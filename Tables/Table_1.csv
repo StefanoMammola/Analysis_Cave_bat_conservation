@@ -1,0 +1,13 @@
+"","Var1","Freq","n_studies","n_estimates","perc_testing","usable","unusable","perc_usable"
+"1","Decontamination",33,2,7,0.21,5,2,0.714285714285714
+"2","Education",51,0,0,0,0,0,NA
+"3","Eradication",1,0,0,0,0,0,NA
+"4","Gate",182,18,146,0.8,54,92,0.36986301369863
+"5","Habitat creation",13,1,5,0.38,1,4,0.2
+"6","Habitat restoration",40,1,9,0.22,0,9,0
+"7","Legislation",19,0,0,0,0,0,NA
+"8","Monitoring ",114,3,11,0.1,9,2,0.818181818181818
+"9","Prioritization",86,5,32,0.37,28,4,0.875
+"10","Protected area",75,1,1,0.01,0,1,0
+"11","Regulate access",65,3,39,0.6,29,10,0.743589743589744
+"12","Risk assessment",36,0,0,0,0,0,NA

@@ -1,7 +1,7 @@
 ###############################################################
 
-## Practical conservation of bats in subterranean habitats
-## Meierhofer M., ... Mammola S.
+## Toward evidence-based conservation of subterranean ecosystems
+## Mammola S., Meierhofer M., ... Cardoso, P.
 
 ## ------------------------------------------------------------------------
 # 'R script to reproduce the analyses'
@@ -18,11 +18,6 @@ rm(list = ls())
 
 # Loading R package -------------------------------------------------------
 
-library("metafor")   # Meta-Analysis Package for R
-library("ggplot2")       
-library("tidyverse")
-
-
 library("circlize")      
 library("cowplot")
 library("dplyr")         
@@ -37,9 +32,100 @@ library("performance")
 library("scatterpie")
 library("tidyr")
 
-# Sourcing useful functions ------------------------------------------------
+# Loading useful functions ------------------------------------------------
 
-source("Functions/Functions_bat.R")
+# Custom function to get standard error
+SE <- function(x) sd(x) / sqrt( length(x) )
+
+# Custom function to predict logistic regressions
+logisticline <- function(z,model) {
+  eta <- model$coefficients[1] + model$coefficients[2]*z ;
+  1 / (1 + exp(-eta))
+}
+
+logisticline_min <- function(z,model) {
+  eta <- model$coefficients[1] + model$coefficients[2]*z - 1.96*summary(model)$coefficients[2] ;
+  1 / (1 + exp(-eta))
+}
+
+logisticline_max <- function(z,model) {
+  eta <- model$coefficients[1] + model$coefficients[2]*z + 1.96*summary(model)$coefficients[2] ;
+  1 / (1 + exp(-eta))
+}
+
+# Custom function to split columns having semicolon as a separator
+semi_colon_splitter <- function(input1, input2, names = c("input1","input2")){
+  
+  df        <- data.frame(input1,input2)  
+  df$input1 <- as.factor(df$input1)
+  df$input2 <- as.factor(df$input2)
+  
+  to_separate <- levels(df$input1)[grepl(";", levels(df$input1))]
+  
+  df_all <- df[df$input1 %in% to_separate ,]
+  df     <- df[!df$input1 %in% to_separate,]
+  df$input1 <- droplevels(df$input1)
+  
+  df_all$input1 <- as.character(df_all$input1)
+  
+  for(i in nrow(df_all)) {
+    
+    df_i <- df_all[i,]
+    split   <- strsplit(df_all$input1, ";")[[1]]
+    split   <- trimws(split, which = c("both"))
+    
+    df <- rbind(df,data.frame(input1  = split,
+                              input2  = rep(df_i$input2, length(split))))
+                              
+  }
+  
+  colnames(df) <- names
+  return(df)
+}
+
+# Parameters for plots ----------------------------------------------------
+
+# Plot style (ggplot2)
+
+theme_custom <- function(){
+  theme_bw() +
+    theme(#text = element_text(family = "Arial"),
+      axis.text = element_text(size = 10), 
+      axis.title = element_text(size = 12),
+      axis.line.x = element_line(color="black"), 
+      axis.line.y = element_line(color="black"),
+      panel.border = element_blank(),
+      panel.grid.major.x = element_blank(),                                          
+      panel.grid.minor.x = element_blank(),
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),  
+      plot.margin = unit(c(1, 1, 1, 1), units = , "cm"),
+      plot.title = element_text(size = 18, vjust = 1, hjust = 0),
+      legend.text = element_text(size = 12),          
+      legend.title = element_blank(),                              
+      legend.position = c(0.95, 0.15), 
+      legend.key = element_blank(),
+      legend.background = element_rect(color = "black", 
+                                       fill = "transparent", 
+                                       size = 2, linetype = "blank"))
+}
+
+# Colors for Figure 2
+col_fig2 <- c("grey10","darkorchid3")
+
+# Colors and parameters for Figure 4
+COL  <- c(rep("grey40",4),"darkgoldenrod2","brown4")
+
+COL2 <- c("blue", "palevioletred4",
+          rep("grey40",2), #n.s.
+          "seagreen4", 
+          "purple",
+          "grey40", #n.s.
+          "black")
+
+alpha1 <- 0.2
+alpha2 <- 0.1
+alpha3 <- 0.6
 
 ###############################################################
 
@@ -49,16 +135,7 @@ source("Functions/Functions_bat.R")
 
 # Loading the Database ----------------------------------------------------
 
-db <-
-  read.csv(
-    file = "Data/database_bat_conservation.csv",
-    sep = '\t',
-    dec = ',',
-    header = TRUE,
-    as.is = FALSE
-  )
-
-str(db)
+db <- read.csv(file = "Data/Database_Practical_conservation_rev1.csv", sep='\t', dec='.',header=T,as.is=F)
 
 #Database only with distinct paper
 db_unique <- distinct(db, ID, .keep_all = TRUE) 
@@ -107,7 +184,7 @@ for(i in 1:nlevels(db$Conservation_Action)){
 
 Table_1 <- data.frame(table(db$Conservation_Action)) # Number of estimates
 
-Table_1 <- data.frame(Table_1, n_studies, n_estimates, perc_testing, usable, unusable, perc_usable)
+Table_1 <- data.frame(Table_1, n_studies,n_estimates,perc_testing,usable,unusable,perc_usable)
 
 write.csv(Table_1,"Tables/Table_1.csv")
 
@@ -124,97 +201,6 @@ levels(db$Impact2)   <- c("Alien species\nPathogens",
                           "Habitat change\n(subterranean)",
                           "Habitat change\n(surface)",
                           "Visitors")
-
-###############################################################
-
-## Meta-Analysis
-
-###############################################################
-
-
-db_metafor <- db[db$Tested_statistically == "yes",]
-db_metafor <- db_metafor[db_metafor$Pearson_r_conversion == "converted",]
-db_metafor <- droplevels(db_metafor)
-
-dim(db_metafor) #2361 standardized estimates
-nlevels(db_metafor$ID) #250 references 
-
-db_metafor <- db_metafor %>% select(ID, 
-                             N,
-                             Domain,
-                             System,
-                             Response_Group,
-                             Predictor_Group,
-                             r = Pearson.s_r)
-
-# Derive Fischer's Z and its variance
-
-db_metafor <- escalc(measure = "ZCOR", ri = r, ni = N, data = db_metafor)
-
-
-db_metafor <- db_metafor[db_metafor$Predictor_Group == "Gate",]
-
-#Check sample size for each predictors
-table_n <- data.frame(predictor = NULL, n = NULL, n_papers = NULL)
-
-for(i in 1:length(unique(levels(db_metafor$Response_Group))))
-  table_n <- rbind(table_n, 
-                          data.frame(predictor = levels(db_metafor$Response_Group)[i],
-                                     n = nrow(db_metafor[db_metafor$Response_Group == levels(db_metafor$Response_Group)[i], ]),
-                                     n_papers = length(unique(db_metafor[db_metafor$Response_Group == levels(db_metafor$Response_Group)[i], ]$ID)))  
-                          
-  )
-
-
-predictors_to_analyse <- c("Behavior","Population")
-
-
-SUBSET    <- list()
-MODEL     <- list()
-
-result_for_plot <- data.frame(label = NULL,
-                              b     = NULL,
-                              ci.lb = NULL,
-                              ci.ub = NULL,
-                              ES    = NULL,
-                              L     = NULL,
-                              U     = NULL)
-
-
-for (i in 1:length(predictors_to_analyse)){  
-  
-  #subset the predictor
-  data_i  <- db_metafor[db_metafor$Response_Group == predictors_to_analyse[i], ]
-  
-  #fitting the model
-  model_i <- rma.mv(yi, vi, random =  ~ 1 | ID, data = na.omit(data_i)) 
-  
-  #extracting coefficients
-  result_for_plot_i <- data.frame(label = paste(predictors_to_analyse[i]," (" ,
-                                                nrow(data_i),", ",
-                                                length(unique(data_i$ID)),")",sep=''),
-                                  b     = model_i$b,
-                                  ci.lb = model_i$ci.lb,
-                                  ci.ub = model_i$ci.ub,
-                                  ES    = ((exp(model_i$b)-1))/((exp(model_i$b)+1)),
-                                  L     = ((exp(model_i$ci.lb)-1)/(exp(model_i$ci.lb)+1)),
-                                  U     = ((exp(model_i$ci.ub)-1)/(exp(model_i$ci.ub)+1)))
-  
- 
-  #store the data 
-  SUBSET[[i]]     <- data_i
-  MODEL[[i]]      <- model_i
-  result_for_plot <- rbind(result_for_plot,result_for_plot_i)
-  
-}
-
-ggplot(data= result_for_plot, aes(x=label, y=ES, ymin=L, ymax=U)) +
-  geom_hline(yintercept=0, lty=2) +  # add a dotted line at x=1 after flip
-  labs(title = "Gating")+
-  xlab("")+
-  ylab("Effect size [r]")+
-  geom_pointrange(col= "black", size= 1) + 
-  coord_flip() + theme_bw() # flip coordinates (puts labels on y axis)
 
 #####################################
 ### FIGURE 2:::::::::::::::::::::::::
