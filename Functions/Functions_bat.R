@@ -67,10 +67,9 @@ theme_custom <- function(){
       plot.title = element_text(size = 18, vjust = 1, hjust = 0),
       legend.text = element_text(size = 12),          
       legend.title = element_blank(),                              
-      legend.position = c(0.95, 0.15), 
+      legend.position = "top", 
       legend.key = element_blank(),
       legend.background = element_rect(color = "black", 
                                        fill = "transparent", 
                                        size = 2, linetype = "blank"))
 }
-

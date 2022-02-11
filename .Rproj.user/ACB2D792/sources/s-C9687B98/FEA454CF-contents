@@ -1,0 +1,667 @@
+#####rarityFacets
+#####Version 0.1 (2021-00-00)
+#####By Stefano Mammola, Federico Riva
+#####Maintainer: 
+#####Reference: Riva, F. & Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+
+library("BAT")
+library("gllvm")
+
+#' Generate a species pool for the community
+#' @description Estimate a species pool (comm_expected) to be used in the estimation of the rarity facets of biodiversity.
+#' @param comm A sites x species matrix, with incidence or abundance data about the species in the community.
+#' @param incidence A boolean indicating whether data are incidence (TRUE) or abundances (FALSE).
+#' @param method Method to estimate the species pool. One of "equal_pool", "stratified_pool", or "modeled_pool".
+#' @param cov ADD 
+#' @param treatment A vector with length equal to the number of species, specifying the assignment of each species to a given habitat
+#' @details Estimates the expected species pool using three methods:
+#' 
+#' - Equal pool: All species are assumed to potentially occur in every site.
+#' 
+#' - Stratified pool: Species are assumed to occur only in a categorical habitat type where they are observed in the study area. 
+#'   If a species occurred in a site of a given treatment, then is expected to occur in every other site belonging to that treatment split in subsets depending on the treatment of interest.
+#' 
+#' - Modeled pool: Model-based expected distribution (thresholded predicted values into presences or absences). Models the relationship between covariates and species occurrence, and use the minimum predicted value across all sites were the species is predicted to be present.
+#' 
+#' @return A matrix with the expected pool.
+#' @references Riva, F., Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+#' @references MENTION gllvm
+#' @references MENTION DARK DIV?
+#' @examples ADD EXAMPLE
+#' @export 
+species.pool <- function(comm, incidence = TRUE, method = "equal_pool", cov, treatment ){
+  
+  # note- add quadratic effect of covariates potentially. 
+  # note- Ste noted in the stratified pool method that a covariate table might not be available
+  # note- check if it works with a covariate table with one column (i.e., not a table but a vector)
+
+  if(isTRUE(incidence)) 
+    comm[comm > 0] <- 1
+  
+  if (method == "equal_pool") { # all species are assumed to potentially occur in every site  
+    comm[comm >= 0] <- 1     
+    comm_expected <- comm
+  } else if(method == "stratified_pool"){ 
+    comm_split <- split(comm, cov[, as.character(treatment)]) # double check if it works with a different treatment name
+    
+    # for every column in every list, if there is at least a 1 change that column to a series of 1s
+    for ( i in 1:length(comm_split))
+      for (j in 1:ncol(comm_split[[i]]))
+        if(sum(comm_split[[i]][,j] > 0))
+          comm_split[[i]][,j] <- rep(1, length(comm_split[[i]][,j]))
+    
+    # reconvert into a dataframe
+    comm_split <- do.call(rbind, comm_split)
+    rownames(comm_split) <- sub('.*\\.', '', rownames(comm_split)) # remove the treatment name 
+    comm_expected <- comm_split[match(rownames(comm), rownames(comm_split)), ] # re-order so that the rownames are now matching comm table
+  }  else if(method == "modeled_pool"){ # model-based expected distribution 
+    tryCatch( #tryCatch because when information is sparse, the model fails
+      expr = {
+        if(incidence) { # two types: occurrence vs abundance
+          predictions <- predict(gllvm::gllvm(comm, cov, family = binomial(link = "probit")))
+        } else {
+          predictions <- predict(gllvm::gllvm(comm, cov, family = "gaussian")) # gaussian seems to be more stable than poisson or negbin, plus, can handle percent cover and other continupus data
+        }
+        
+        list_pred <- list()
+        for(i in 1:ncol(comm)){
+          list_pred[[i]] <- as.data.frame(t(rbind(predictions[,i], comm[,i]))) # make a dataframe connecting predictions and observed values
+          list_pred[[i]] <- list_pred[[i]][list_pred[[i]][,2] > 0, ] # remove rows with no species observed
+          list_pred[[i]] <- min(list_pred[[i]][,1]) # retain the minimun predicted value at which at least one individuals was observed
+        }
+        
+        comm_expected <- predictions
+        for(i in 1:ncol(comm_expected)){
+          for(j in 1: nrow(comm_expected)){
+            if(comm_expected[,i][j] >= list_pred[[i]]){
+              comm_expected[,i][j] <- 1
+            }
+            else
+            {comm_expected[,i][j] <- 0 }
+          }
+        }
+      },
+      error = function(e){ 
+        print("Error with model fitting. Could not fit gllvm() due to a lack of information in the data or due to a species with all 0s in the comm table")
+      })
+  } else { stop("method must be either 'equal_pool', 'stratified_pool', or 'modeled_pool'. See helpfile.") }
+  
+  return(as.matrix(comm_expected))
+}
+
+#' Rarity facets of biodiversity for the index 0
+#' @description Estimate the rarity facets of biodiversity (Zeta, Eta, Theta, Iota, and Kappa) for the species belonging to multiple sites.
+#' @param comm A sites x species matrix, with incidence data about the species in the community (1 for presence, 0 for absence).
+#' @param comm_expected A sites x species matrix, with incidence data about the expected species in the community. If missing, all species are assumed to potentially occur in every site.
+#' @param incidence A boolean indicating whether data are incidence (TRUE) or abundances (FALSE).
+#' @details Estimates the rarity facets of biodiversity for the index 0 (all sites taken together), using the approach described in Riva & Mammola (2021).
+#' The five rarity facets are:
+#' 
+#' ‐Zeta: species that are common to all assemblages 
+#' ‐Eta: species that are not unique to an assemblage nor common to all assemblages
+#' ‐Theta: species that are unique to an assemblage
+#' ‐Iota: species expected based on the species pool, but that were not observed 
+#' ‐Kappa: species present in a set of assemblages, but that are not expected in a specific assemblage.
+#' 
+#' Note that Iota corresponds to Dark diversity sensu Pärtel et al. (2011) when calculated as a traditional metric.
+#' @return A list containing 3 outputs:
+#' Species-level: a vector (factor) with the assignment of each species to its rarity facet.
+#' Site-level: a site x facet matrix, reporting the number of species belonging in each rarity facet for each site
+#' Macroecological-level: a table giving the number of species for each rarity facets across the system.
+#' @references Riva, F., Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+#' @references Pärtel, M., Szava-Kovats, R., Zobel M. (2011) Dark diversity: Shedding light on absent species. Trends in Ecology and Evolution, 26(3):124–128. 
+#' @examples comm <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5))) 
+#' comm_expected <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5)))
+#' # name species
+#' colnames(comm) <- colnames(comm_expected) <- paste(rep("Sp_",ncol(comm)),1:ncol(comm), sep = "")
+#' 
+#' #Calculating the rarity facets
+#' (rarity_facets <- rarity.zero(comm = comm, comm_expected = comm_expected))
+#' 
+#' #visualize the distribution
+#' barplot(table(rarity_facets))
+#' @export
+rarity.zero <- function(comm, 
+                        comm_expected = NULL, 
+                        incidence = TRUE) { 
+  
+  #Define rarity facets and their order
+  facets <- c("zeta","eta","theta","iota","kappa")
+  
+  #Abundances vs incidence data
+  if(isTRUE(incidence)){
+    comm2 <- ifelse(comm > 0, 1, 0)
+    rownames(comm2) <- rownames(comm)
+  } else { stop("Abundance data are not implemented yet.") } # poi cambiamo se riusciamo a mettere abudance
+  
+  # Check if comm_expected if missing
+  if(is.null(comm_expected) == TRUE) 
+    stop("Comm expected is missing. It can be generated with the function species.pool")
+  
+  #Initial quality checks
+  if(nrow(comm2) != nrow(comm_expected))
+    stop("Number of sites in Comm and Comm_expected do not match")
+  
+  if(ncol(comm2) != ncol(comm_expected))
+    stop("Number of species in Comm and Comm_expected do not match")
+ 
+  #Estimation of rarity facets
+  rarity <- vector()
+  
+  for (i in 1:ncol(comm2)) {
+    
+    if (sum(comm2[,i]) == 0)  # if the sum is zero, can be either iota or kappa:
+      rarity[i] <- ifelse(sum(comm_expected[,i]) == 0, "kappa", "iota")  
+    else if (sum(comm2[,i]) == 1) # else if the sum is 1, then the species is found only in an assemblage 
+      rarity[i] <- "theta" 
+    else ## else if the sum >1, can be either eta o theta:
+      rarity[i] <- ifelse(sum(comm2[,i]) == length(comm2[,i]), "zeta", "eta")  
+    
+  }
+  
+  #Name species vector if names are provided
+  names(rarity) <- colnames(comm2)
+  
+  # Convert rarity as factor to add missing facets (if any)
+  rarity <- as.factor(rarity)
+  rarity <- factor(rarity, levels = c(levels(rarity), facets[facets %in% names(table(rarity)) == FALSE] ))
+  
+  #Generate output
+  rarity         <- factor(rarity, levels = facets) #Individual-level: What is the rarity to which each species belong?
+  comm_rarity    <- t(apply(comm, 1, function(s) table(rarity[comm2[s,]>0]))) #Site-level: How many species of each facet per site? --- richness/ shannon // hill?
+  macro_rarity   <- table(rarity) #Macroecological-level: How many species in each facet across the entire system?
+  
+  facet_zero <- list(rarity, comm_rarity, macro_rarity)
+  names(facet_zero) <- c('Species_level', 'Site_level', 'Macro_level')
+  
+  return(facet_zero) 
+}
+
+#' Functional contribution of each species to its rarity facets of biodiversity
+#' @description Estimation the functional contribution of each species to its rarity facets of biodiversity (Zeta, Eta, Theta, Iota, and Kappa).
+#' @param comm A sites x species matrix, with incidence data about the species in the community (1 for presence, 0 for absence).
+#' @param comm_expected A sites x species matrix, with incidence data about the expected species in the community. Can be estimated with the function species.pool
+#' @param trait Either a object of hclust (functional dendrogram), a convex hull, or an hypervolume representing the trait space of all species in comm. These can be generated using functions in the R package BAT. See details and example.
+#' @param ... further arguments to be passed to the package BAT.
+#' @details For each species in each rarity facets (sensu Riva & Mammola, 2021), estimates the functional contribution with respect to the total functional diversity (trait space of all communities).
+#' Three approaches are implemented: functional dendrograms, convex hulls, and kernel density hypervolumes. 
+#' Trait spaces can be generate using the functions in the R package BAT (Cardoso et al., 2021), namely BAT::tree.build for functional dendrgram, BAT::hull.build for convex hulls, and BAT::kernel.build for hypervolumes.
+#' @return A list containing 3 outputs:
+#' Species-level: a vector (factor) with the phylogenetic or functional contribution of each species to its rarity facet.
+#' Site-level: a site x facet matrix, reporting the sum of phylogenetic or functional  contribution of species to each rarity facet for each site
+#' Macroecological-level: a vector giving the total phylogenetic or functional contribution of species to each rarity facets across the system.
+#' @references Cardoso, P., Mammola, S., Rigal, F., Carvalho, J. (2021). BAT: Biodiversity Assessment Tools. https://CRAN.R-project.org/package=BAT
+#' @references Riva, F., Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+#' @examples 
+#' # Generate random communities
+#' comm          <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5))) 
+#' comm_expected <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5)))
+#' 
+#' # Generate a random trait matrix
+#' trait <- data.frame(T1 = rnorm(20), T2 = rnorm(20), T3 = rnorm(20))
+#' 
+#' # name species
+#' colnames(comm) <- colnames(comm_expected) <- rownames(trait) <- paste(rep("Sp_",ncol(comm)),1:ncol(comm), sep = "")
+#' 
+#' # With a functional dendrogram
+#' tree <- BAT::tree.build(trait)
+#' rarity.zero.FD(comm = comm, comm_expected = comm_expected, trait = tree)
+#' 
+#' # With convex hull
+#' convex <- BAT::hull.build(comm= rep(1,20), trait = trait)
+#' rarity.zero.FD(comm = comm, comm_expected = comm_expected, trait = convex)
+#' 
+#' # With functional hypervolume
+#' hyper <- BAT::kernel.build(comm= rep(1,20), trait = trait)
+#' rarity.zero.FD(comm = comm, comm_expected = comm_expected, trait = hyper)
+#' @export
+rarity.zero.FD = function(comm, comm_expected = NULL, trait, ...) {
+  
+  comm2 <- ifelse(comm > 0, 1, 0)
+  rownames(comm2) <- rownames(comm)
+  
+  if(is.null(comm_expected) == TRUE) 
+    stop("Comm expected is missing. It can be generated with the function species.pool")
+  
+  #Initial quality checks
+  if(nrow(comm2) != nrow(comm_expected))
+    stop("Number of sites in Comm and Comm_expected do not match")
+  
+  if(ncol(comm2) != ncol(comm_expected))
+    stop("Number of species in Comm and Comm_expected do not match")
+  
+  #Calculating the rarity facets
+  rarity <- rarity.zero(comm = comm2, comm_expected = comm_expected)
+  
+  #Calculating the functional or phylogenetic contribution of each species 
+  message("\nCalculating the diversity contribution of each species ...")                               
+  if(class(trait) == "hclust")     
+    div <- BAT::contribution(tree = trait, ...) 
+  else if(class(trait) == "convhulln")
+    div <- BAT::hull.contribution(trait, ...)
+  else if(class(trait) == "Hypervolume")
+    div <- BAT::kernel.contribution(trait, ...)
+  else
+    stop("trait must be either a a functional dendrogram, a convex hull, or a hypervolume. See helpfile.")
+  message("\n ... done")
+  # Generate the output
+  #Species-level
+  rarity <- data.frame(rarity_facet = rarity$Species_level, 
+                       FD = as.vector(div))
+  
+  #Site-level
+  comm_rarity <- t( apply(comm, 1, function(s) tapply(rarity[comm2[s,]>0, ]$FD, 
+                                                      rarity[comm2[s,]>0, ]$rarity_facet, sum)) )
+  comm_rarity[is.na(comm_rarity)]  <- 0
+  #Macro level
+  macro_rarity <- tapply(rarity$FD, rarity$rarity_facet, sum) 
+  macro_rarity[is.na(macro_rarity)] <- 0
+  
+  facet_zero <- list(rarity, comm_rarity, macro_rarity)
+  names(facet_zero) <- c('Species_level', 'Site_level', 'Macro_level')
+  return(facet_zero)
+} 
+
+#' Rarity facets of biodiversity calculated as multi-assemblage metrics (index > 0)
+#' @description Estimate the rarity facets of biodiversity (Zeta, Eta, Theta, Iota, and Kappa) for specified orders.
+#' @param comm A sites x species matrix, with incidence data about the species in the community (1 for presence, 0 for absence).
+#' @param comm_expected A sites x species matrix, with incidence data about the expected species in the community. Can be estimated with the function species.pool
+#' @param incidence A boolean indicating whether data are incidence (TRUE) or abundances (FALSE). 
+#' @param rawdata A boolean indicating whether the functionl should return raw data for each random combination (TRUE) or not (FALSE). Default is FALSE.
+#' @param order An integer or vector of positive integers, indicating the order(s) that should be calculated. Note that the maximum order should be number of sites - 1.
+#' @param random A boolean (TRUE/FALSE) specifying whether, for each specified order, a random number of combination or all possible combination of sites should be taken.
+#' @param nrandom Number of combination to be calculated. Note that if the number of combination for a given order is < nrandom, all possible combinations are taken. Ignored if random = FALSE.
+#' @details Estimates the rarity facets of biodiversity for the specified orders, using the approach described in Riva & Mammola (2021).
+#' When calculated as multi-assemblage metrics, as in the original Zeta diversity framework (Hui & McGeoch 2014), the rarity facets correspond to the average number of species that occur in the five rarity facets across the possible combinations of n assemblages from the full set of assemblages.
+#' e.g., for the order 3, Kappa3 is the average number of species present in the study region but that are missing from sets of three assemblages because they do not belong to the species pool of those assemblages). 
+#' @return A list containing 3 outputs:
+#' 
+#' Species-level: a data.frame with the proportion of times a given species was assigned to a given rarity facet for each order.
+#' Site-level: a data.frame with the average (+/- sd) number of species assigned to each rarity facets for each community.
+#' Macroecological-level: a data.frame with the average (+/- sd) number of species assigned to each rarity facets across the system for each order.
+#' 
+#' If rowdata = TRUE, a list of lists with the estimated rarity facets for the Species-, Site- and Macroecological- levels for each randomisation and order.
+#' 
+#' @references Riva, F., Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+#' @references Hui, C., McGeoch, M.A. (2014) Zeta diversity as a concept and metric that unifies incidence-based biodiversity patterns. American Naturalist, 184:684–694. 
+#' @examples comm <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5), site_3 = rbinom(20, 1, 0.5), site_4 = rbinom(20, 1, 0.5))) 
+#' colnames(comm) <- paste(rep("Sp_",ncol(comm)),1:ncol(comm), sep = "")
+#' comm_expected <- species.pool(comm)
+#'
+#' #Normal output
+#' (output <- rarity.order(comm, comm_expected, random = TRUE, nrandom = 100))
+#'
+#' #Output with raw data
+#' result <- rarity.order(comm, comm_expected, order = c(1,2,3), rawdata = TRUE)
+#' result$Species_level
+#' result$Site_level
+#' result$Macro_level    
+#' @export
+rarity.order <- function(comm, 
+                         comm_expected = NULL, 
+                         incidence = TRUE, 
+                         rawdata = FALSE, 
+                         order = c(1:2), 
+                         random = TRUE, 
+                         nrandom = 100) {
+  
+  #Abundances vs incidence data
+  if(isTRUE(incidence)){
+    comm2 <- ifelse(comm > 0, 1, 0)
+    rownames(comm2) <- rownames(comm)
+  } else { stop("Abundance data are not implemented yet.") } # poi cambiamo se riusciamo a mettere abudance
+  
+  # Check if comm_expected if missing
+  if(is.null(comm_expected) == TRUE) 
+    stop("Comm expected is missing. It can be generated with the function species.pool")
+  
+  #Check the nature of order
+  if(any(order < 1))
+    stop("Order should be a vector of integers numbers above 0")
+  
+  if(max(order) > (nrow(comm)-1))
+    stop("Maximum specified order should be below the total number of sites minus one")
+  
+  #Other quality checks
+  if(nrow(comm2) != nrow(comm_expected))
+    stop("Number of sites in Comm and Comm_expected do not match")
+  
+  if(ncol(comm2) != ncol(comm_expected))
+    stop("Number of species in Comm and Comm_expected do not match")
+  
+  #Define useful variables
+  n_comm     <- nrow(comm2)
+  n_sp       <- ncol(comm2)
+  site_names <- rownames(comm2)
+  sp_names   <- colnames(comm2)
+  facets     <- c("zeta","eta","theta","iota","kappa") #Define rarity facets and their order
+  
+  #Take random combination of sites for each order
+  site_combinations <- list()
+  
+  if(random) {
+    for (i in 1:length(order)) {
+      
+      if(choose(n_comm, order[i]) < nrandom)  { #Check if random is below n combination. If below, takes all combinations
+        site_combinations[[i]] <- matrix(t((combn(site_names, order[i]))), ncol = i)
+      } else {
+        matrix_i <- matrix(sort(sample(rownames(comm2),order[i])))
+        while(ncol(matrix_i) < random)     
+          matrix_i <- cbind(matrix_i, sort(matrix(sample(site_names, order[i]))))
+        site_combinations[[i]] <- unique(t(matrix_i))
+      } 
+    }
+  } else { #Take all combinations
+    site_combinations <- sapply(1:length(order), function (c) matrix(t((combn(site_names, order[c]))), ncol = c))
+  }
+
+  #Get rarity facet for each combination
+  list_facets_species <- list()
+  list_facets_comm    <- list()
+  list_facets_macro   <- list()
+  
+  for(j in 1:length(site_combinations)){
+    
+    #Extracting the first set of combinations
+    site_j <- site_combinations[[j]]
+    
+    #Extract each random matrix
+    combination_obs_j <- lapply(1:nrow(site_j), 
+                                function(s) subset(comm2, site_names %in% site_j[s,] ) )
+    
+    combination_exp_j <- lapply(1:nrow(site_j), 
+                                function(p) subset(comm_expected, site_names %in% site_j[p,] ) )
+    
+    #Extract rarity facet for each combination
+    list_facets_species[[j]]  <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]])$Species_level)
+    
+    list_facets_comm[[j]]     <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]])$Site_level)
+    
+    list_facets_macro[[j]]    <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]])$Macro_level)
+    
+  }
+  # Generate the output
+  if(isTRUE(rawdata)){ #If rawdata == TRUE, return the list of rawdata
+    names(list_facets_species) <-  names(list_facets_comm) <- names(list_facets_macro)  <- paste(rep("Order",length(order)), order, sep="")
+    facet_order <- list(list_facets_species,list_facets_comm,list_facets_macro)
+  } else { #Generating summarized output 
+    
+  for(k in 1:length(list_facets_species)){
+  
+    #Species level
+    species <- do.call("rbind", list_facets_species[[k]])
+    species <- data.frame(species)
+    
+    #.... is there a shorter way to do this?
+    species[species == 1] <- facets[1]
+    species[species == 2] <- facets[2]
+    species[species == 3] <- facets[3]
+    species[species == 4] <- facets[4]
+    species[species == 5] <- facets[5]
+    
+    for(l in 1:ncol(species)){
+      #add missing levels
+      species[,l] <- as.factor(species[,l])
+      species[,l] <- factor(species[,l], levels = c(levels(species[,l]), facets[facets %in% names(table(species[,l])) == FALSE] ))
+      species[,l] <- factor(species[,l], levels = facets) 
+      
+      #take proportion
+      species_l <- table(species[,l]) / sum(table(species[,l]))
+      
+      #rbind all results
+      if(l > 1)
+        species_proportion <- rbind(species_proportion, species_l)
+      else
+        species_proportion <- species_l
+       }
+    
+    species_proportion <- data.frame(species = as.factor(as.character(sp_names)),
+                                     order = rep(order[k], nrow(species_proportion)), 
+                                     species_proportion)
+    
+    #Site level
+    tab_comm <- do.call("rbind",list_facets_comm[[k]])
+    tab_comm <- data.frame(tab_comm, site = factor(rownames(tab_comm))) ; rownames(tab_comm) <- NULL
+    comm_rarity_avg <- apply(tab_comm[,1:5], 2, function (x) tapply(x, tab_comm$site, mean))
+    comm_rarity_sd  <- apply(tab_comm[,1:5], 2, function (x) tapply(x, tab_comm$site, sd))
+    comm_full <- rbind(comm_rarity_avg,comm_rarity_sd) ; rownames(comm_full) <- NULL
+    
+    comm_rarity_mean <- data.frame(site   = factor(rep(site_names,2)),
+                                    var   = factor(c(rep("mean", n_comm), rep("sd", n_comm))),
+                                    order = rep(order[k], n_comm),
+                                    comm_full)
+   
+    #Macroecological level
+    tab_macro     <- do.call("rbind",list_facets_macro[[k]])
+    tab_macro_avg <- apply(tab_macro, 2, mean)
+    tab_macro_sd  <- apply(tab_macro, 2, sd)
+    macro_full <- rbind(tab_macro_avg,tab_macro_sd) ; rownames(macro_full) <- NULL
+    
+    macro_rarity_mean <- data.frame(var = c("mean","sd"),
+                               order = rep(order[k], 2),
+                               macro_full)
+    
+    #rbind all results
+    if(k > 1){
+      rarity_order       <- rbind(rarity_order, species_proportion)
+      comm_rarity_order  <- rbind(comm_rarity_order, comm_rarity_mean)
+      macro_rarity_order <- rbind(macro_rarity_order, macro_rarity_mean)
+    }else{
+      rarity_order       <- species_proportion
+      comm_rarity_order  <- comm_rarity_mean
+      macro_rarity_order <- macro_rarity_mean
+    }
+ }
+ 
+ #Regular output
+    rownames(rarity_order) <- rownames(macro_rarity_order) <- rownames(comm_rarity_order) <- NULL
+    facet_order <- list(rarity_order, comm_rarity_order, macro_rarity_order) 
+  }
+  names(facet_order) <- c('Species_level', 'Site_level', 'Macro_level') 
+  return(facet_order)
+}
+
+#' Functional contribution of each species to its rarity facets calculated as multi-assemblage metrics.
+#' @description Estimate the functional contribution of each species to the rarity facets of biodiversity (Zeta, Eta, Theta, Iota, and Kappa) for specified orders.
+#' @param comm A sites x species matrix, with incidence data about the species in the community (1 for presence, 0 for absence).
+#' @param comm_expected A sites x species matrix, with incidence data about the expected species in the community. 
+#' @param trait Either a object of hclust (functional dendrogram), a convex hull, or an hypervolume representing the trait space of all species in comm. It can be generated using functions in the R package BAT. See details and example.
+#' @param rawdata A boolean indicating whether the function should return raw data for each random combination (TRUE) or not (FALSE). Default is FALSE.
+#' @param order An integer or vector of positive integers, indicating the order(s) that should be calculated. Note that the maximum order should be number of sites - 1.
+#' @param random A boolean (TRUE/FALSE) specifying whether, for each specified order, a random number of combination or all possible combination of sites should be taken.
+#' @param nrandom Number of combination to be calculated. Note that if the number of combination for a given order is < nrandom, all possible combinations are taken. Ignored if random = FALSE.
+#' @param ... further arguments to be passed to the package BAT.
+#' @details Estimates the rarity facets of biodiversity for multipèle assemblages (Riva & Mammola, 2021).
+#' When calculated as multi-assemblage metrics, as in the original Zeta diversity framework (Hui & McGeoch 2014), the functional contribution rarity facets correspond to proportional values across the possible combinations of n assemblages from the full set of assemblages.
+#' @return A list containing 3 outputs:
+#' 
+#' Species-level: a data.frame with the proportional functional contribution to any rarity facet for each order.
+#' Site-level: a data.frame with the average (+/- sd) functional contribution of species assigned to each rarity facets for each community.
+#' Macroecological-level: a data.frame with the average (+/- sd) functional contribution of species assigned to each rarity facets across the system for each order.
+#' 
+#' If rowdata = TRUE, a list of lists with the estimated functional contribution to the rarity facets for the Species-, Site- and Macroecological- levels for each randomisation and order.
+#' 
+#' @references Riva, F., Mammola, S. (2021) Rarity facets of biodiversity: integrating Zeta diversity and Dark diversity to understand the nature of commonness and rarity. Ecology & Evolution, 11(20):13912-13919.
+#' @references Hui, C., McGeoch, M.A. (2014) Zeta diversity as a concept and metric that unifies incidence-based biodiversity patterns. American Naturalist, 184:684–694. 
+#' @examples 
+#' # Generate a random community 
+#' comm  <- t(data.frame(site_1 = rbinom(20, 1, 0.5), site_2 = rbinom(20, 1, 0.5), site_3 = rbinom(20, 1, 0.5)))
+#' # Generate an expected pool
+#' comm_expected <- species.pool(comm)
+#' # Generate a random trait matrix
+#' trait <- data.frame(T1 = rnorm(20), T2 = rnorm(20), T3 = rnorm(20))
+#' # Name species
+#' colnames(comm) <- colnames(comm_expected) <- rownames(trait) <- paste(rep("Sp_",ncol(comm)),1:ncol(comm), sep = "")
+#' 
+#' # With a functional dendrogram
+#' tree <- BAT::tree.build(trait)
+#' rarity.order.FD(comm = comm, comm_expected, order = c(1,2), trait = tree)
+#' 
+#' # With convex hull
+#' hull <- BAT::hull.build(comm = rep(1, ncol(comm)), trait = trait)
+#' rarity.order.FD(comm = comm, comm_expected, order = c(1,2), trait = hull)
+#' 
+#' # With functional hypervolume
+#' hyper <- BAT::kernel.build(comm = rep(1, ncol(comm)), trait = trait)
+#' #rarity.order.FD(comm = comm, comm_expected = comm_expected, order = c(1,2), trait = hyper)
+#' # (Takes several minutes)
+#' @export
+rarity.order.FD <- function(comm, 
+                            comm_expected = NULL, 
+                            trait,
+                            incidence = TRUE,
+                            rawdata = FALSE, 
+                            order = c(1:2), 
+                            random = TRUE, 
+                            nrandom = 100, 
+                            ...) {
+  
+  # Generate an incidence-based comm
+  comm2 <- ifelse(comm > 0, 1, 0)
+  rownames(comm2) <- rownames(comm)
+  
+  # Check if comm_expected if missing
+  if(is.null(comm_expected) == TRUE) 
+    stop("Comm expected is missing. It can be generated with the function species.pool")
+  
+  #Check the nature of order
+  if(any(order < 1))
+    stop("Order should be a vector of integers numbers above 0")
+  
+  if(max(order) > (nrow(comm)-1))
+    stop("Maximum specified order should be below the total number of sites minus one")
+  
+  #Other quality checks
+  if(nrow(comm2) != nrow(comm_expected))
+    stop("Number of sites in Comm and Comm_expected do not match")
+  
+  if(ncol(comm2) != ncol(comm_expected))
+    stop("Number of species in Comm and Comm_expected do not match")
+  
+  #Define useful variables
+  n_comm     <- nrow(comm2)
+  n_sp       <- ncol(comm2)
+  site_names <- rownames(comm2)
+  sp_names   <- colnames(comm2)
+  facets     <- c("zeta","eta","theta","iota","kappa") #Define rarity facets and their order
+  
+  #Take random combination of sites for each order
+  site_combinations <- list()
+  
+  if(random) {
+    for (i in 1:length(order)) {
+      
+      if(choose(n_comm, order[i]) < nrandom)  { #Check if random is below n combination. If below, takes all combinations
+        site_combinations[[i]] <- matrix(t((combn(site_names, order[i]))), ncol = i)
+      } else {
+        matrix_i <- matrix(sort(sample(rownames(comm2),order[i])))
+        while(ncol(matrix_i) < random)     
+          matrix_i <- cbind(matrix_i, sort(matrix(sample(site_names, order[i]))))
+        site_combinations[[i]] <- unique(t(matrix_i))
+      } 
+    }
+  } else { #Take all combinations
+    site_combinations <- sapply(1:length(order), function (c) matrix(t((combn(site_names, order[c]))), ncol = c))
+  }
+  
+  #Get rarity facet for each combination
+  list_facets_species <- list()
+  list_facets_comm    <- list()
+  list_facets_macro   <- list()
+  
+  for(j in 1:length(site_combinations)){
+    
+    #Extracting the first set of combinations
+    site_j <- site_combinations[[j]]
+    
+    #Extract each random matrix
+    combination_obs_j <- lapply(1:nrow(site_j), 
+                                function(s) subset(comm2, site_names %in% site_j[s,] ) )
+    
+    combination_exp_j <- lapply(1:nrow(site_j), 
+                                function(p) subset(comm_expected, site_names %in% site_j[p,] ) )
+    
+    #Extract rarity facet for each combination
+    list_facets_species[[j]]  <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero.FD(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]], trait = trait, ...)$Species_level)
+    
+    list_facets_comm[[j]]     <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero.FD(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]], trait = trait, ...)$Site_level)
+    
+    list_facets_macro[[j]]    <- lapply(1:length(combination_obs_j), 
+                                        function(r) rarity.zero.FD(comm = combination_obs_j[[r]], comm_expected = combination_exp_j[[r]], trait = trait, ...)$Macro_level)
+  }
+  # Generate the output
+  if(isTRUE(rawdata)){ #If rawdata == TRUE, return the list of rawdata
+    names(list_facets_species) <-  names(list_facets_comm) <- names(list_facets_macro)  <- paste(rep("Order",length(order)), order, sep="")
+    facet_order <- list(list_facets_species,list_facets_comm,list_facets_macro)
+  } else { #Generating summarized output 
+    
+    for(k in 1:length(list_facets_species)){
+      
+      #Species level
+      species <- do.call("cbind", list_facets_species[[k]])
+      
+      for(l in 1:nrow(species)){ 
+        #add missing levels
+        species_facets <- as.factor(t(species[ l ,seq(from = 1, to = ncol(species), by = 2)])) #take all rairity facets
+        species_facets <- factor(species_facets, levels = facets) 
+        
+        #take proportion of contribution
+        species_l <- rep(species[l,2],5) * (table(species_facets) / sum(table(species_facets)))
+        
+        #rbind all results
+        if(l > 1)
+          species_proportion <- rbind(species_proportion, species_l)
+        else
+          species_proportion <- species_l
+      }
+      
+      species_proportion <- data.frame(species = as.factor(as.character(sp_names)),
+                                       order = rep(order[k], nrow(species_proportion)), 
+                                       species_proportion)
+      
+      #Site level
+      tab_comm <- do.call("rbind",list_facets_comm[[k]])
+      tab_comm <- data.frame(tab_comm, site = factor(rownames(tab_comm))) ; rownames(tab_comm) <- NULL
+      comm_rarity_avg <- apply(tab_comm[,1:5], 2, function (x) tapply(x, tab_comm$site, mean))
+      comm_rarity_sd  <- apply(tab_comm[,1:5], 2, function (x) tapply(x, tab_comm$site, sd))
+      comm_full <- rbind(comm_rarity_avg,comm_rarity_sd) ; rownames(comm_full) <- NULL
+      
+      comm_rarity_mean <- data.frame(site   = factor(rep(site_names,2)),
+                                     var   = factor(c(rep("mean", n_comm), rep("sd", n_comm))),
+                                     order = rep(order[k], n_comm),
+                                     comm_full)
+      
+      #Macroecological level
+      tab_macro     <- do.call("rbind",list_facets_macro[[k]])
+      tab_macro_avg <- apply(tab_macro, 2, mean)
+      tab_macro_sd  <- apply(tab_macro, 2, sd)
+      macro_full <- rbind(tab_macro_avg,tab_macro_sd) ; rownames(macro_full) <- NULL
+      
+      macro_rarity_mean <- data.frame(var = c("mean","sd"),
+                                      order = rep(order[k], 2),
+                                      macro_full)
+      
+      #rbind all results
+      if(k > 1){
+        rarity_order       <- rbind(rarity_order, species_proportion)
+        comm_rarity_order  <- rbind(comm_rarity_order, comm_rarity_mean)
+        macro_rarity_order <- rbind(macro_rarity_order, macro_rarity_mean)
+      }else{
+        rarity_order       <- species_proportion
+        comm_rarity_order  <- comm_rarity_mean
+        macro_rarity_order <- macro_rarity_mean
+      }
+    }
+    
+    #Regular output
+    rownames(rarity_order) <- rownames(macro_rarity_order) <- rownames(comm_rarity_order) <- NULL
+    facet_order <- list(rarity_order, comm_rarity_order, macro_rarity_order) 
+  }
+  names(facet_order) <- c('Species_level', 'Site_level', 'Macro_level') 
+  return(facet_order)
+}

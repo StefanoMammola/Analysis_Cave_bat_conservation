@@ -60,6 +60,14 @@ db <-
 
 str(db)
 
+# How many study consider bats and other groups?
+
+a <- ifelse(table(db$ID, db$Taxon_Group)>0,1,0)
+table(rowSums(a))
+
+# Selecting only bats
+db <- db[db$Taxon_Group == "Bats",] ; db <- droplevels(db)
+
 #Database only with distinct paper
 db_unique <- distinct(db, ID, .keep_all = TRUE) 
 
@@ -73,6 +81,9 @@ levels(db$Taxon_Group)
 levels(db$Impact)
 levels(db$Conservation_Group)
 levels(db$Conservation_Action)
+
+#Type of actions
+table(db$Publication_type)
 
 #Summary statistics (Literature)
 table(db_unique$Source) ; sum(table(db_unique$Source)) # N° of unique sources
@@ -95,42 +106,35 @@ for(i in 1:nlevels(db$Conservation_Action)){
   db_i_tot <- db[db$Conservation_Action == levels(db$Conservation_Action)[i],]
   db_i     <- db_i_tot[db_i_tot$Tested_statistically == "yes",]
   
-  table_i <- table(db_i$Pearson_r_conversion) #% of usable statistics
+  table_i        <- table(db_i$Pearson_r_conversion) #% of usable statistics
   n_studies      <- c(n_studies, nrow(distinct(db_i, ID, .keep_all = TRUE)) ) #unique studies
   n_estimates    <- c(n_estimates, nrow(db_i) ) #unique estimates
-  perc_testing   <- c(perc_testing, round(nrow(db_i)/nrow(db_i_tot),2) )
+  perc_testing   <- c(perc_testing, round(nrow(db_i)/nrow(db_i_tot),2)*100 )
   usable         <- c(usable, sum(table_i[1],table_i[3]))
   unusable       <- c(unusable, sum(table_i[2]))
-  perc_usable    <- c(perc_usable, (usable[i]/sum(table_i)))
+  perc_usable    <- c(perc_usable, round((usable[i]/sum(table_i)),2)*100)
   
 }
 
-Table_1 <- data.frame(table(db$Conservation_Action)) # Number of estimates
-
-Table_1 <- data.frame(Table_1, n_studies, n_estimates, perc_testing, usable, unusable, perc_usable)
+Table_1 <- data.frame(Intervention = levels(db$Conservation_Action), n_studies, n_estimates, perc_testing, usable, unusable, perc_usable)
+Table_1[is.na(Table_1)] <- 0
+colnames(Table_1) <- c("Intervention", "N° studies", "N° interventions", "% testing", "N° usable", "N° unusable", "% usable")
 
 write.csv(Table_1,"Tables/Table_1.csv")
 
 #Redefining impact
 db$Impact2 <- db$Impact
 
-levels(db$Impact2)   <- c("Alien species\nPathogens",
-                          "All",
-                          "Climate\nchange",
-                          "None",
-                          "Alien species\nPathogens",
-                          "Overexploitation\nPoaching",
-                          "Pollution",
-                          "Habitat change\n(subterranean)",
-                          "Habitat change\n(surface)",
-                          "Visitors")
+levels(db$Impact)[2] <- "Multiple"
+levels(db$Impact)[8] <- "Subterranean\nhabitat change"
+levels(db$Impact)[9] <- "Surface\nhabitat change"
+                          
 
 ###############################################################
 
 ## Meta-Analysis
 
 ###############################################################
-
 
 db_metafor <- db[db$Tested_statistically == "yes",]
 db_metafor <- db_metafor[db_metafor$Pearson_r_conversion == "converted",]
@@ -141,7 +145,7 @@ nlevels(db_metafor$ID) #250 references
 
 db_metafor <- db_metafor %>% select(ID, 
                              N,
-                             Domain,
+                           Domain,
                              System,
                              Response_Group,
                              Predictor_Group,
@@ -151,8 +155,10 @@ db_metafor <- db_metafor %>% select(ID,
 
 db_metafor <- escalc(measure = "ZCOR", ri = r, ni = N, data = db_metafor)
 
+table(db_metafor$Predictor_Group,db_metafor$Response_Group) # Disturbance reduction & Gate
 
-db_metafor <- db_metafor[db_metafor$Predictor_Group == "Gate",]
+# Gate
+db_metafor <- db_metafor[db_metafor$Predictor_Group == "Gate" | db_metafor$Predictor_Group == "Disturbance reduction",] ; db_metafor <- droplevels(db_metafor)
 
 #Check sample size for each predictors
 table_n <- data.frame(predictor = NULL, n = NULL, n_papers = NULL)
@@ -165,14 +171,14 @@ for(i in 1:length(unique(levels(db_metafor$Response_Group))))
                           
   )
 
-
-predictors_to_analyse <- c("Behavior","Population")
-
+actions_to_analyse    <- c("Gate", "Disturbance reduction")
 
 SUBSET    <- list()
 MODEL     <- list()
 
-result_for_plot <- data.frame(label = NULL,
+result_for_plot <- data.frame(label_action = NULL,
+                              label_pred = NULL,
+                              size = NULL,
                               b     = NULL,
                               ci.lb = NULL,
                               ci.ub = NULL,
@@ -180,41 +186,316 @@ result_for_plot <- data.frame(label = NULL,
                               L     = NULL,
                               U     = NULL)
 
-
-for (i in 1:length(predictors_to_analyse)){  
+# Modelling
+for (j in 1:length(actions_to_analyse)){ 
   
-  #subset the predictor
-  data_i  <- db_metafor[db_metafor$Response_Group == predictors_to_analyse[i], ]
+  data_j  <- db_metafor[db_metafor$Predictor_Group == actions_to_analyse[j], ] ; data_j <- droplevels(data_j)
   
-  #fitting the model
-  model_i <- rma.mv(yi, vi, random =  ~ 1 | ID, data = na.omit(data_i)) 
+  predictors_to_analyse <- levels(data_j$Response_Group)
   
-  #extracting coefficients
-  result_for_plot_i <- data.frame(label = paste(predictors_to_analyse[i]," (" ,
-                                                nrow(data_i),", ",
-                                                length(unique(data_i$ID)),")",sep=''),
-                                  b     = model_i$b,
-                                  ci.lb = model_i$ci.lb,
-                                  ci.ub = model_i$ci.ub,
-                                  ES    = ((exp(model_i$b)-1))/((exp(model_i$b)+1)),
-                                  L     = ((exp(model_i$ci.lb)-1)/(exp(model_i$ci.lb)+1)),
-                                  U     = ((exp(model_i$ci.ub)-1)/(exp(model_i$ci.ub)+1)))
   
- 
-  #store the data 
-  SUBSET[[i]]     <- data_i
-  MODEL[[i]]      <- model_i
-  result_for_plot <- rbind(result_for_plot,result_for_plot_i)
-  
+  for (i in 1:length(predictors_to_analyse)){  
+    
+    #subset the predictor
+    data_i  <- data_j[data_j$Response_Group == predictors_to_analyse[i], ]
+    
+    #fitting the model
+    model_i <- rma.mv(yi, vi, random =  ~ 1 | ID, data = na.omit(data_i)) 
+    
+    #extracting coefficients
+    result_for_plot_i <- data.frame(label_action =  actions_to_analyse[j],
+                                  label_pred = paste(predictors_to_analyse[i]," (" ,
+                                                  nrow(data_i),", ",
+                                                  length(unique(data_i$ID)),")",sep=''),
+                                    size = length(unique(data_i$ID)),
+                                    b     = model_i$b,
+                                    ci.lb = model_i$ci.lb,
+                                    ci.ub = model_i$ci.ub,
+                                    ES    = ((exp(model_i$b)-1))/((exp(model_i$b)+1)),
+                                    L     = ((exp(model_i$ci.lb)-1)/(exp(model_i$ci.lb)+1)),
+                                    U     = ((exp(model_i$ci.ub)-1)/(exp(model_i$ci.ub)+1)))
+    
+    
+    #store the data 
+    SUBSET[[i]]     <- data_i
+    MODEL[[i]]      <- model_i
+    result_for_plot <- rbind(result_for_plot,result_for_plot_i)
+    
+  }
 }
 
-ggplot(data= result_for_plot, aes(x=label, y=ES, ymin=L, ymax=U)) +
-  geom_hline(yintercept=0, lty=2) +  # add a dotted line at x=1 after flip
-  labs(title = "Gating")+
-  xlab("")+
-  ylab("Effect size [r]")+
-  geom_pointrange(col= "black", size= 1) + 
-  coord_flip() + theme_bw() # flip coordinates (puts labels on y axis)
+rownames(result_for_plot) <- NULL
+
+(meta_analysis <- ggplot(data= result_for_plot) +
+     geom_hline(yintercept = 0, lty = 2, col = "grey50") +  # add a dotted line at x=1 after flip
+     xlab("")+
+     ylab("Effect size [r]")+
+     geom_pointrange(aes(x=label_pred, y=ES, ymin=L, ymax=U, col= label_action, size = ), size= .5) + 
+     scale_color_manual(values = c("darkmagenta","grey10"))+
+     coord_flip() + 
+     theme_custom() +
+     theme(axis.text.y = element_text(face= c("plain","bold","plain","bold","plain")))) # flip coordinates (puts labels on y axis)
+
+#Save figure
+pdf(file = "Figure/Figure_XX.pdf", width = 7, height =5)
+meta_analysis
+dev.off()
+
+
+# Conservation actions by Family ------------------------------------------
+
+
+levels(db$Higher_Geography)
+family_action <- semi_colon_splitter(input1 = db$Family,
+                            input2 = db$Conservation_Action, 
+                            names = c("Family","Action"))
+
+levels(family_action$Family)
+
+Graph_bipartite <- family_action %>% 
+  dplyr::select(Family,Action) %>% 
+  table() %>% 
+  igraph::graph_from_incidence_matrix(directed = FALSE) %>% 
+  tidygraph::as_tbl_graph(directed = FALSE)
+
+# Graph_bipartite <- Graph_bipartite %>% tidygraph::activate(nodes) %>% 
+#   left_join(rbind(data.frame(table(db$Taxon)),
+#                   data.frame(table(db$Conservation_Action))), by = c("name" = "Var1"))
+
+
+# Collapse it into an unipartite 
+Graph_unipartite_full <- igraph::bipartite_projection(Graph_bipartite)
+
+# Takes the unipartite project graph
+Graph_unipartite <- Graph_unipartite_full$proj1  %>% as_tbl_graph(directed = FALSE) %>% 
+  activate(edges) %>% #%>% mutate(weight = 1) 
+  igraph::simplify(edge.attr.comb = "sum") %>% 
+  as_tbl_graph
+
+
+########################
+# Plotting the network #
+########################
+
+#SpatialLayout
+Graph_plot <- Graph_unipartite %>% 
+  igraph::simplify(edge.attr.comb = "sum") 
+
+# Graph_plot_bat <- to_subgraph(Graph_unipartite, to %in% c(9) | from %in% c(9), subset_by = "edges")$subgraph %>% 
+#   igraph::simplify(edge.attr.comb = "sum") 
+
+ggraph::ggraph(Graph_plot_bat,  layout_with_kk(Graph_plot)) +
+   geom_edge_arc(aes(width=weight) , strength = .1,
+                alpha = 0.1) +
+  
+  geom_node_point(fill="grey30", alpha = .8, 
+                  aes(size=Freq), shape = 21) + 
+  geom_node_text(aes(label = name), size=4, color="gray10", repel=TRUE, force = 10) +
+  scale_color_gradient2("Connection strength",
+                        low= "#f7fcfd",
+                        mid = "#8c96c6",
+                        high = "#4d004b") +
+   theme_void() + theme(legend.position = "bottom",legend.direction = "horizontal") + coord_fixed()
+
+Graph_bipartite %>%  igraph::simplify(edge.attr.comb = "sum") %>% 
+  ggraph::ggraph(.,  layout = "bipartite") +
+  geom_edge_link0(edge_colour = "grey66")+
+  geom_node_point(alpha = .8, 
+                  aes(size=Freq, fill=type), shape = 21) +
+  scale_fill_manual(values=c("blue","red"))+
+  scale_colour_manual(values=c("blue","red"))+
+  geom_node_text(aes(label = name, color=type), size=4, repel=TRUE, force = 10) +
+  
+  theme_void() + theme(legend.position = "left",legend.direction = "horizontal") 
+library(ade4) # If you have not already done so
+
+bipartite_matrix <- as_incidence_matrix(Graph_bipartite)  # Extract the matrix
+
+animal_jaccard <- dist.binary(bipartite_matrix, method=1, upper=TRUE, diag = FALSE) # Method #1 is "Jaccard Index"
+conservation_jaccard <- dist.binary(t(bipartite_matrix), method=1, upper=TRUE, diag = FALSE) 
+
+animal_jaccard <- as.matrix(animal_jaccard)   
+diag(animal_jaccard)<-0
+
+# women_jaccard          # Look at the matrix before you binarize
+animal_jaccard <- ifelse(animal_jaccard>0.7, 1, 0)     # Binarize
+
+# jaccard_women      # Take a look at the matrix if you like.
+
+animal_jaccard <- graph_from_adjacency_matrix(animal_jaccard,    # Create an igraph network
+                                              mode = "undirected")
+plot(animal_jaccard)
+
+# Network test ------------------------------------------------------------
+
+library("tidyverse")
+library("ggraph")
+library("igraph")        
+library("tidygraph")
+
+db <- read.csv(file = "Data/Database_Practical_conservation.csv", sep='\t', dec='.',header=T,as.is=F)
+
+db <- db[db$System != "Anchialine/Marine",] ; db <- droplevels(db)
+
+levels(db$Taxon)[c(4,5,15,17)] <- "Omit"
+
+levels(db$Taxon)[c(2,6,17,20)] <- "Other Invertebrates"
+
+levels(db$Taxon)[c(5,11)] <- "Other Vertebrates"
+
+levels(db$Taxon)[c(7,16)] <- "Microorganisms"
+
+levels(db$Taxon)[10]    <- "Chiroptera"
+
+db <- db[db$Taxon != "Omit",] ; db <- droplevels(db)
+
+db <- db[db$Direction_of_effect != "Negative",] ; db <- droplevels(db)
+
+Graph_bipartite <- db %>% 
+  dplyr::select(Taxon,Conservation_Action) %>% 
+  table() %>% 
+  igraph::graph_from_incidence_matrix(directed = FALSE) %>% 
+  tidygraph::as_tbl_graph(directed = FALSE) 
+
+Graph_bipartite <- Graph_bipartite %>% tidygraph::activate(nodes) %>% 
+  left_join(rbind(data.frame(table(db$Taxon)),
+                  data.frame(table(db$Conservation_Action))), by = c("name" = "Var1"))
+
+
+# Collapse it into an unipartite 
+Graph_unipartite_full <- igraph::bipartite_projection(Graph_bipartite)
+
+# Takes the unipartite project graph
+Graph_unipartite <- Graph_unipartite_full$proj1  %>% as_tbl_graph(directed = FALSE) %>% 
+  activate(edges) %>% #%>% mutate(weight = 1) 
+  igraph::simplify(edge.attr.comb = "sum") %>% 
+  as_tbl_graph
+
+
+########################
+# Plotting the network #
+########################
+
+#SpatialLayout
+Graph_plot <- Graph_unipartite %>% 
+    igraph::simplify(edge.attr.comb = "sum") 
+
+Graph_plot_bat <- to_subgraph(Graph_unipartite, to %in% c(9) | from %in% c(9), subset_by = "edges")$subgraph %>% 
+  igraph::simplify(edge.attr.comb = "sum") 
+
+ggraph::ggraph(Graph_plot_bat,  layout_with_kk(Graph_plot)) +
+    #geom_edge_density(fill="orange", alpha=1) +
+    geom_edge_arc(aes(width=weight) , strength = .1,
+                  alpha = 0.1) +
+    
+    geom_node_point(fill="grey30", alpha = .8, 
+                    aes(size=Freq), shape = 21) + 
+    geom_node_text(aes(label = name), size=4, color="gray10", repel=TRUE, force = 10) +
+    scale_color_gradient2("Connection strength",
+                          low= "#f7fcfd",
+                          mid = "#8c96c6",
+                          high = "#4d004b") +
+    #scale_fill_manual(values = c("blue", "orange", "pink","purple", "grey15")) +
+    theme_void() + theme(legend.position = "bottom",legend.direction = "horizontal") + coord_fixed()
+
+citation("mgcv")
+
+Graph_bipartite %>%  igraph::simplify(edge.attr.comb = "sum") %>% 
+  ggraph::ggraph(.,  layout_with_kk(.)) +
+   geom_edge_arc(
+                 strength = .1,
+                alpha = 0.3) +
+   geom_node_point(alpha = .8, 
+                  aes(size=Freq, fill=type), shape = 21) +
+  scale_fill_manual(values=c("blue","red"))+
+  scale_colour_manual(values=c("blue","red"))+
+  geom_node_text(aes(label = name, color=type), size=4, repel=TRUE, force = 10) +
+  
+  theme_void() + theme(legend.position = "bottom",legend.direction = "horizontal") + coord_fixed()
+
+library(ade4) # If you have not already done so
+
+bipartite_matrix <- as_incidence_matrix(Graph_bipartite)  # Extract the matrix
+
+animal_jaccard <- dist.binary(bipartite_matrix, method=1, upper=TRUE, diag = FALSE) # Method #1 is "Jaccard Index"
+conservation_jaccard <- dist.binary(t(bipartite_matrix), method=1, upper=TRUE, diag = FALSE) 
+
+animal_jaccard <- as.matrix(animal_jaccard)   
+diag(animal_jaccard)<-0
+
+# women_jaccard          # Look at the matrix before you binarize
+animal_jaccard <- ifelse(animal_jaccard>0.7, 1, 0)     # Binarize
+
+# jaccard_women      # Take a look at the matrix if you like.
+
+animal_jaccard <- graph_from_adjacency_matrix(animal_jaccard,    # Create an igraph network
+                                          mode = "undirected")
+plot(animal_jaccard)
+
+
+
+#Generalized exponential random graph model
+library("ergm.count")
+library("network")
+
+AdjMatrix <- Graph_unipartite %>% get.adjacency(attr = "weight", sparse = FALSE) 
+AdjMatrix %>% as.matrix %>% dim #square
+
+ResponseNetwork <- as.network(AdjMatrix %>% as.matrix, 
+                              directed = TRUE, 
+                              matrix.type = "a", 
+                              ignore.eval = FALSE, 
+                              names.eval = "weight")  # Important! )
+
+#levels(db$Taxon)[10] <- "A"
+
+#Adding node-level attributes
+ResponseNetwork %v% "Taxon"            <- as.character(db$Taxon)
+
+ergm_count  <- ergm(ResponseNetwork ~ 
+                      sum + 
+                      nodefactor("Taxon", levels = "Chiroptera", form = "sum"),
+                    control = control.ergm(
+                      parallel = 10, #change with your parallel
+                      MCMC.samplesize = 10000,
+                      MCMLE.maxit = 100),
+                    response = "weight", 
+                    reference = ~ Poisson)
+?nodefactor
+summary(ergm_count)
+
+
+
+# Check model
+  mcmc.diagnostics(ergm_count) #good mixing of chains
+  
+  
+Figure_s2 <-  ergm_count %>%
+    summary %>%
+  magrittr::extract2("coefficients") %>%
+    data.frame %>%
+    rownames_to_column("Variable") %>%
+    left_join(ergm_count %>%
+                confint %>%  # Grabbing the 95% confidence intervals
+                data.frame %>%
+                rename(Lower = 1, Upper = 2) %>% 
+                rownames_to_column("Variable")) %>% 
+    # mutate(Variable = fct_recode(Variable, 
+    #                              "Edges" = "edges",
+    #                              "Node factor" = "nodefactor.SEARCH_TYPE.Ecological complexity",
+    #                              )  %>% 
+    ggplot2::ggplot(aes(Variable, Estimate)) +
+    geom_hline(lty = 2, yintercept = 0, col = "grey30") +
+    geom_errorbar(aes(ymin = Lower, ymax = Upper), width = .2, size=1) +
+    geom_point(size= 4) +
+    theme_bw()+
+    coord_flip()+
+    labs(x="", y="Mean effect size (95% confidence interval)")
+  
+  
+  
+  
+
 
 #####################################
 ### FIGURE 2:::::::::::::::::::::::::
@@ -244,9 +525,11 @@ pie <- data.frame(region = levels(pie_1$Var1),
                   yes = pie_1$Freq[c(nlevels(pie_1$Var1)+1):c(nrow(pie_1))],
                   radius = radius$Freq)
 
+col_fig2 = c("darkmagenta","grey10")
+
 # Loading data
 world <- map_data("world")
-biog_regions <- raster::shapefile("Biogeographic_regions/regioni biogeografiche_Biological Review.shp")
+#biog_regions <- raster::shapefile("Biogeographic_regions/regioni biogeografiche_Biological Review.shp")
 
 map1 <- ggplot() +
     geom_map(map = world, data = world,
@@ -256,9 +539,9 @@ map1 <- ggplot() +
     labs(title = NULL) +
   
     #Add bioregion
-    geom_path(data = fortify(biog_regions),
-            aes(x = long, y = lat, group = group),
-            color = 'grey70', size = .2) +
+    # geom_path(data = fortify(biog_regions),
+    #         aes(x = long, y = lat, group = group),
+    #         color = 'grey70', size = .2) +
     
     #global
     annotate(geom="text", x=-154, y=35, label="Global",
