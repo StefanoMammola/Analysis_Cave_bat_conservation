@@ -1,0 +1,199 @@
+## vignette("brms_phylogenetics")
+## https://github.com/paul-buerkner/brms/issues/26
+## https://cran.r-project.org/web/packages/brms/vignettes/brms_monotonic.html
+
+shell("cls")
+rm(list = ls())
+t1 <- Sys.time()
+####################################
+# 1. Loading R packages ------------------------------------------------------
+####################################
+library(ape)
+library(brms)
+library(sjPlot)
+library(ggplot2)
+library("gridExtra")
+library("performance") # Assessment of Regression Models Performance
+
+####################################
+# 2. Setting working directory -----------------------------------------------
+####################################
+mypath0 <- "D:/fish_China/traits_SDM_water_2000km/glmm_2022_104_species"
+setwd(mypath0)
+
+response.var <- "PercLoss" ## "PercLoss", "PercGain", "SpeciesRangeChange", "CurrentRangeSize"
+
+####################################
+# 3. Loading the database  ---------------------------------------------------
+####################################
+phylo <- ape::read.tree(paste0(mypath0, "/COI_101_0302.fas.contree.nwk"))
+## convert tree to phylogenetic variance-covariance matrix (ranging from 0 to 1)
+A <- ape::vcv.phylo(phylo)
+plot(phylo)
+
+sdm.101   <- read.csv(file = paste0(mypath0, "/range_size_change_101_species_check.csv"), header = TRUE, sep = ",", row.names = 1)
+sdm.101$accepted.name <- gsub(pattern = " ", replacement = "_", x = sdm.101$accepted.name)
+
+trait.101 <- read.csv(file = paste0(mypath0, "/species_trait_taxonomy_temp_mean_0312.csv"), header = TRUE, sep = ",", row.names = 1)
+trait.101$accepted.name <- gsub(pattern = " ", replacement = "_", x = trait.101$accepted.name)
+
+mutation.rate.101 <- as.data.frame(readxl::read_excel(path = paste0(mypath0, "/Spe.mutation.rate.xlsx")))
+names(mutation.rate.101)
+names(mutation.rate.101) <- c("Species", "Nucleotide", "Divergence", "Mutation")
+
+####################################
+## check species names
+####################################
+## should all be 101
+sum(phylo$tip.label %in% sdm.101$accepted.name)
+sum(phylo$tip.label %in% trait.101$accepted.name)
+sum(sdm.101$accepted.name %in% trait.101$accepted.name)/32
+
+####################################
+## combine trait and mutation
+####################################
+#order and check
+trait.101 <- trait.101[order(trait.101$accepted.name), ]
+mutation.rate.101 <- mutation.rate.101[order(mutation.rate.101$Species), ]
+all.equal(trait.101$accepted.name, mutation.rate.101$Species) ## should be TRUE
+
+trait <- cbind(trait.101, mutation.rate.101[, c("Divergence", "Mutation")])
+
+####################################
+# renaming some traits
+####################################
+str(trait)
+colnames(trait)
+ncol(trait)
+
+colnames(trait) <- c(
+  "accepted.name",    "species",
+  "Length",           "Weight",        
+  "Maturity.age",     "Egg.Size",      
+  "Fecundity",        "BatchSpawn", 
+  "Water.layer",      "Guarder",       
+  "IUCN",             "Climatezone", 
+  "Trophic.level",    "Riverbed",
+  "Vulnerability",    "Resilience", 
+  "Temp.range",       "Elevation",     
+  "Migratory",        "Foraging",
+  "Pelegic.egg",      "Body.shape",  
+  "caudal.fin.shape", "Range.MCP",
+  "kingdom",          "phylum",
+  "class",            "order",
+  "family",           "genus",
+  "Temp.mean",
+  "Divergence",       "Mutation")
+
+####################################
+# 4. Merge the two databases -------------------------------------------------
+####################################
+db <- merge(x = sdm.101, y = trait, by = "accepted.name", all = TRUE)
+nrow(sdm.101) - nrow(na.omit(db))
+## 3 has NA values (there is no suitable range in future, so centroid distance is NA)
+
+####################################
+# 5. scale continous traits ----------------------------------------------------
+####################################
+trait.continuous <- c("Length",        "Weight", 
+                      "Maturity.age",  "Egg.Size",
+                      "Fecundity",     "Trophic.level", 
+                      "Temp.range",    "Temp.mean", 
+                      "Elevation",     "Range.MCP",
+                      "Divergence",    "Mutation",
+                      "Vulnerability")
+
+db[, trait.continuous] <- apply(db[, trait.continuous], MARGIN = 2, FUN = function(X) (X - min(X, na.rm = T))/diff(range(X, na.rm = T)))
+cor(db[, trait.continuous], use="complete.obs")
+##########################################
+# 6. change into factor ------------------------------------------------------
+##########################################
+## db$BatchSpawn <- as.factor(stringr::str_to_title(db$BatchSpawn))
+trait.categorical <- c("BatchSpawn",  "Water.layer", "Guarder",
+                       "IUCN",        "Climatezone", "Riverbed",
+                       "Resilience",  "Migratory",   "Foraging",
+                       "Pelegic.egg", "Body.shape",  "caudal.fin.shape",
+                       "time", "RCP")
+
+for (target.categorical in trait.categorical) {
+  db[, target.categorical] <- as.factor(stringr::str_to_title(db[, target.categorical]))
+}
+
+##########################################
+# 7.Selected traits after data exploration -----------------------------------
+##########################################
+## possible important traits based on previous studies
+## https://doi.org/10.1111/gcb.14662
+## length, age at maturity, fecundity, offspring size, parental care, water column position, trophic guild
+print(c(trait.continuous, trait.categorical))
+
+## most of fish are benthic: benthopelagic (76), demersal (24), pelagic (1)
+
+##target.traits <- c(
+##  "Length", "Maturity.age", "Fecundity", "Egg.Size", "Trophic.level",  ## continuous traits based on previous study
+##  "Guarder",                                                           ## categorical traits based on previous study
+##  "Elevation", "Range.MCP",   "Temp.mean",                             ## continuous traits in this study
+##  "Pelegic.egg", "BatchSpawn",  "Migratory", "time", "RCP")            ## categorical traits in this study
+
+## "Divergence", "Mutation",
+## "Range.MCP",  "Fecundity" Foraging
+
+target.traits <- c(
+  "Length",      "Maturity.age", "Egg.Size", "Foraging", "Guarder",
+  "Pelegic.egg", "BatchSpawn",   "Migratory",
+  "Elevation",   "Temp.mean",
+  "time",        "RCP")
+
+##########################################
+# 8. Setting baselines ---------------------------------------------------------
+##########################################
+db <- within(db,  Guarder     <- relevel(Guarder,     ref = "No"))
+db <- within(db,  Pelegic.egg <- relevel(Pelegic.egg, ref = "No"))
+db <- within(db,  BatchSpawn  <- relevel(BatchSpawn,  ref = "Once"))
+db <- within(db,  Migratory   <- relevel(Migratory,   ref = "No"))
+db <- within(db,  time        <- relevel(time,        ref = "2050s"))
+db <- within(db,  RCP         <- relevel(RCP,         ref = "Rcp45"))
+
+##########################################
+# 9. Preparing response variable for beta glmm -------------------------------
+##########################################
+## https://github.com/glmmTMB/glmmTMB/issues/507
+db$PercLoss.0.1 <- db$PercLoss/100 ## convert % to 0-1 proportion
+range(db$PercLoss.0.1, na.rm = T)  ## zero values cannot exist in beta
+db$PercLoss.0.1 <- ifelse(db$PercLoss.0.1 > 0, db$PercLoss.0.1, 0.001) # converting 0 to 0.0000000001
+db$PercLoss.0.1 <- ifelse(db$PercLoss.0.1 < 1, db$PercLoss.0.1, 0.999) # converting 1 to 0.999
+range(db$PercLoss.0.1, na.rm = T) ## why the range is not 0.001 to 0.999 (0.00001 to 0.99992)
+
+######################################################
+## 10. model fit: A Phylogenetic Model with Repeated Measurements
+######################################################
+## Often, we have multiple observations per species and this allows to fit more complicated phylogenetic models.
+## ????ʦ???????ص???ע???¼?????״,?뿴һ?²?ͬ??״??Ӱ??
+## ��??????״??Length, Maturity.age, Fecundity, Egg.Size, Range.MCP
+## ??ɢ????״??Guarder, Foraging, BatchSpawn, Migratory, Pelegic.egg, time
+## ????ЧӦ??random factor??:?Ŵ????룬GCM ????ͬ??????ģ?ͣ?
+
+## ????1??ģ?????á???????ģ?????ã?formula?Ƿ???ȷ???????????Ƿ?ǡ?????Ƿ????���
+## ????2?????????͡????ν???ģ?ͽ????????磺??Щ??״??????Ӱ?죿Ӱ?????Σ?????Guarder?????????????Ƿ?????????Ϊ--????һ??Ϊɥʧ???????ࣿ????
+
+db$species <- db$accepted.name
+
+m.beta.rbm <- brm(
+  formula = as.formula(paste0("PercLoss.0.1", " ~ ", paste(target.traits, collapse = " + "), "+ (1|gr(species, cov = A)) + ( 1 | GCM)")),
+  ## formula = PercLoss.0.1 ~ Length + Maturity.age + Fecundity + Egg.Size + Trophic.level + Guarder + Mutation + Divergence + Elevation + Temp.mean + Range.MCP + Pelegic.egg + BatchSpawn + Migratory + time + RCP + (1|gr(phylo, cov = A)) + ( 1 | GCM),
+  data = db, 
+  family = "beta", 
+  data2 = list(A = A),
+  chains = 4,     ## Number of Markov chains
+  cores  = 4,     ## Number of cores to use
+  iter   = 20000, ## Number of total iterations per chain (including warmup; defaults to 2000)
+  warmup = 5000   ## number of warmup (aka burnin) iterations
+)
+
+save.image(file = "glmm_brms.RData")
+
+summary(m.beta.rbm)
+##conditional_effects(m.beta.rbm)
+
+Sys.time()- t1 ## 11.61055 hours
+

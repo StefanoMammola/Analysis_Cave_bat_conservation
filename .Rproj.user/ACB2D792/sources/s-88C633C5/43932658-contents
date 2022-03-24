@@ -1,0 +1,74 @@
+
+# Demonstration_DayOne_Diet.R ####
+
+library(tidyverse); library(vegan); library(magrittr); library(ggregplot)
+library(cowplot)
+
+theme_set(theme_cowplot())
+
+Elton <- read.delim("R/Demonstrations/DayOne/MamFuncDat.txt")
+
+Elton
+
+Elton %<>% 
+  mutate(Sp = Scientific %>% str_trim %>% str_replace_all(" ", "_")) %>% 
+  arrange(Sp)
+
+Elton %<>% filter(!Scientific == "")
+
+Elton %<>% slice(1:100)
+
+Elton %>% 
+  dplyr::select(contains("Diet.")) %>% 
+  mutate_all(AsBinary) %>% 
+  rowSums(na.rm = T) -> Elton$DietNo
+
+Elton %>% 
+  dplyr::select(contains("Diet.")) %>% 
+  dplyr::select(-matches("Source|Certainty")) -> Proportions
+
+Proportions %>% vegan::diversity() -> Diversities
+
+Elton$DietDiversity <- Diversities
+
+# DietMatrix <- Proportions %>% vegdist(method = "euclidean")
+DietMatrix <- Proportions %>% vegdist(method = "bray")
+
+DietMatrix %<>% as.matrix
+
+DietMatrix %>% c %>% range
+
+dimnames(DietMatrix) <- list(Elton$Sp, Elton$Sp)
+
+library(igraph); library(tidygraph); library(ggraph)
+
+InvDietMatrix <- 1 - DietMatrix
+
+diag(InvDietMatrix) <- 0
+
+DietGraph <- graph_from_adjacency_matrix(InvDietMatrix, 
+                                         mode = "undirected",
+                                         weighted = T)
+
+DietGraph <- 
+  DietGraph %>% as_tbl_graph() %>% activate(nodes) %>% 
+  left_join(Elton, by = c("name" = "Sp"))
+
+DietGraph %>% ggraph() +
+  geom_edge_arc(alpha = 0.1) +
+  geom_node_point() +
+  coord_fixed()
+
+DietGraph %>% ggraph() +
+  geom_edge_arc(aes(alpha = weight)) +
+  scale_alpha_continuous(range = c(0.1, 0.4)) +
+  geom_node_point() +
+  coord_fixed() 
+
+DietGraph %>% ggraph() +
+  geom_edge_arc(aes(alpha = weight)) +
+  scale_alpha_continuous(range = c(0.1, 0.4)) +
+  geom_node_point(aes(colour = MSWFamilyLatin)) +
+  coord_fixed() 
+
+

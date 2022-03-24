@@ -1,0 +1,488 @@
+###############################################################
+
+# clean the workspace -----------------------------------------------------
+
+rm(list = ls())
+
+# Packages ----------------------------------------------------------------
+
+library("ggpubr")
+library("ggplot2")
+library("graphics")
+library("PupillometryR") # A Unified Pipeline for Pupillometry Data 
+library("RAT")
+library("stats")
+library("utils")
+library("wosr")
+
+# Set working directory ---------------------------------------------------
+
+setwd("/Users/stefanomammola/Desktop/PAPERS IN CORSO/Cardoso_et_al_RAT/I_index")
+
+###### can remove later when the package will be in CRAN
+map <-
+  read.table(
+    "centroid_table.csv",
+    sep = ",",
+    as.is = TRUE,
+    header = TRUE
+  )
+
+# Year range --------------------------------------------------------------
+
+range_year <- c(1990:2020)
+
+# Get Wos data ------------------------------------------------------------
+
+# Setting sid
+sid <-
+  auth(NULL, password = NULL) #change with your WoS access (if you have a university VPN, keep it as is)
+
+# Setting WoS collection
+coll <-
+  c("SCI", "SSCI", "AHCI", "ISTP", "ISSHP", "BSCI", "BHCI", "ESCI")
+
+data_wos<-readRDS( "data_wos.rds")
+
+# Extracting University of Helsinki data
+data_wos <- list()
+
+# Extracting WoS data (take ca. 1 hour with a good Internet connection)
+for (i in 1:length(range_year))  {
+  string <-
+    paste("OO = Helsingin yliopisto OR OO = Helsinki University AND PY = (",
+          range_year[i],
+          ")",
+          sep = '')
+  data_wos[[i]] <-
+    wosr::pull_wos(string, editions = coll, sid = sid)
+}
+
+saveRDS(data_wos, "data_wos.rds")
+
+data_wos <- readRDS("data_wos.rds")
+
+a <- c()
+for (i in 1:31)
+ a <- append(a,nrow(data_wos[[i]]$publication))
+
+sum(a)
+
+# Calculate indexes over time for University of Helsinki ------------------
+
+i_index      <- c()
+h_index      <- c()
+n_publ       <- c()
+
+for (i in 1:length(data_wos)) {
+  i_index <- append(i_index, i.index(data_wos[[i]]))
+  h_index <- append(h_index, h.index(data_wos[[i]]))
+  n_publ  <- append(n_publ, nrow(data_wos[[i]]$publication))
+}
+
+#storing data in the format for the cor plot
+db2 <- data.frame(n_publ,i_index, h_index, year = range_year)
+
+# Plot results ------------------------------------------------------------
+
+(time_plot <- ggplot(db2) +
+    
+    geom_line(
+      aes(x = year, y = i_index),
+      color = "blue",
+      size = 1.5,
+      linetype = 1
+    ) +
+    
+    geom_point(
+      aes(
+        x = year,
+        y = i_index,
+        size = n_publ
+      ),
+      color = "grey5",
+      fill = "blue",
+      shape = 21
+    ) +
+    
+    scale_color_manual(values = col) +
+    scale_fill_manual(values  = col) +
+    
+    scale_x_continuous(breaks = c(seq(
+      from = min(range_year),
+      to = max(range_year),
+      by = 5
+    ))) +
+    
+    labs(
+      x = NULL,
+      y = "Index value",
+      size = "Number of publications",
+      title = NULL,
+      subtitle = NULL
+      #caption = "Web of Science data"
+    ) +
+    
+   theme_bw() +
+    #guides(size = "none")+
+    
+    theme(
+      legend.position = c(0.1,0.8),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 10),
+      legend.background = element_rect(colour = 'grey30', fill = 'white', linetype='solid'),
+      #plot.title = element_text(color="black", size=14, face="bold"),
+      axis.title = element_text(size = 12),
+      axis.text.x = element_text(size = 11),
+      axis.text.y = element_text(size = 11),
+      panel.grid = element_blank(),
+      plot.caption = element_text(size = 10, color = "gray30")
+    )
+)
+
+# #get correlation
+# as.numeric(round(cor.test(db2$i_index, db2$h_index)$estimate, 4))
+# 
+# cor_exp <- expression(paste("Pearson's ",
+#                             italic("r"),
+#                             " = 0.24"))
+# #plot
+# 
+# (cor_plot <- ggplot(db2, aes(y = i_index, x = h_index)) +
+#     geom_smooth(
+#       method = lm,
+#       se = FALSE,
+#       col = "grey30",
+#       size = 1,
+#       alpha = 1
+#     ) +
+#     geom_point(
+#       aes(size = n_publ, fill = year),
+#       color = "grey5",
+#       shape = 21
+#     ) +
+#     scale_fill_gradient(low = "white",
+#                         high = "orange") +
+#     annotate(
+#       geom = "text",
+#       x = 62,
+#       y = 25,
+#       size = 5,
+#       label = cor_exp,
+#       color = "black"
+#     ) +
+#     theme_bw() + 
+#     
+#     theme(
+#       #legend.position = c(0.5,0.9),
+#       #legend.title = element_blank(),
+#       #legend.text = element_text(size = 10),
+#       #plot.title = element_text(color="black", size=14, face="bold"),
+#       axis.title = element_text(size = 12),
+#       axis.text.x = element_text(size = 11),
+#       axis.text.y = element_text(size = 11),
+#       panel.grid = element_blank(),
+#       plot.caption = element_text(size = 10, color = "gray30")
+#     ) +
+#   
+#     labs(
+#       size = "Number of\npublications",
+#       fill = "Year",
+#       x = "h-index",
+#       y = "i-index"
+#     )
+# )
+# 
+# pdf(file = "Figure.pdf",
+#     width = 12,
+#     height = 6)
+# 
+# ggpubr::ggarrange(
+#   time_plot,
+#   cor_plot,
+#   nrow = 1,
+#   ncol = 2,
+#   labels = c("A", "B"),
+#   font.label = list(
+#     size = 16,
+#     color = "black",
+#     face = "bold",
+#     family = NULL
+#   ),
+#   align = "hv"
+# )
+# dev.off()
+
+# Getting a list of people for H-index vs i-index -------------------------
+
+#data_wos    <- readRDS("data_wos.rds")
+wos_2020    <- data_wos[[31]]$author #data from 2020
+sample_id   <- sample(1:nrow(wos_2020))[1:300] #take 300 id
+wos_2020_sampled <- wos_2020[sample_id,]
+
+# Extracting University of Helsinki data
+#data_wos_2020 <- list()
+data_wos_2020 <- readRDS("data_wos_2020.rds")
+
+# Extracting WoS data 
+for (i in 1:nrow(wos_2020_sampled))  {
+  
+  print(paste("------- Author number: ", i, " -------", sep = ''))
+  string <- paste("AU = ",
+                  wos_2020_sampled[i,]$display_name, sep = '')
+  data_wos_2020[[i]] <- wosr::pull_wos(string, editions = coll, sid = sid)
+  
+}
+
+#saveRDS(data_wos_2020, "data_wos_2020.rds")
+
+# calculate i-index and h-index
+
+i_index      <- c()
+h_index      <- c()
+n_publ       <- c()
+academic_age <- c()
+
+for (i in 1:27) {
+  i_index <- append(i_index, i.index(data_wos_2020[[i]]))
+  h_index <- append(h_index, h.index(data_wos_2020[[i]]))
+  n_publ  <- append(n_publ, nrow(data_wos_2020[[i]]$publication))
+  
+  #Academic age
+  year <-
+    format(as.POSIXct(data_wos_2020[[i]]$publication$date, format = "%m/%d/%Y"),
+           format = "%Y")
+  year <- as.numeric(year)
+  academic_age <-
+    append(academic_age, max(year, na.rm = TRUE) - min(year, na.rm = TRUE))
+  
+}
+
+db <- data.frame(n_publ, academic_age, i_index, h_index)
+
+
+db <- readRDS("authors.rds")
+db$area <- as.factor(db$area)
+levels(db$area)[3] <- "particle physics"
+
+db$i_index_l <- log(db$i_index+1)
+db$h_index_l <- log(db$h_index+1)
+
+# Plotting h-index vs i-index ---------------------------------------------
+
+#get correlation
+as.numeric(round(cor.test(db$i_index_l, db$h_index_l)$estimate, 4))
+
+cor_exp <- expression(paste("Pearson's ",
+                            italic("r"),
+                            " = 0.86"))
+
+
+
+#set color
+COL <- c("chartreuse3","blue","black","purple")
+
+#plot
+
+(plot_cor <- ggplot(db, aes(y = jitter(i_index_l), x = jitter(h_index_l))) +
+    geom_smooth(
+      method = lm,
+      se = FALSE,
+      col = "grey30",
+      size = 1,
+      alpha = 1
+    ) +
+    geom_point(
+      aes(fill = area),
+      color = "grey30",
+      size= 3,
+      alpha = 0.8,
+      shape = 21
+    ) +
+    scale_fill_manual(values=COL)+
+    annotate(
+      geom = "text",
+      x = 0.7,
+      y = 2.2,
+      size = 4,
+      label = cor_exp,
+      color = "black",
+      fontface = "bold"
+    ) +
+    theme_bw() + labs(
+      title = "A",
+      size = "Number of\npublications",
+      fill = "Field of\nexpertise",
+      x = "h-index [log-transformed]",
+      y = "i-index [log-transformed]"
+    ) + theme(
+      legend.position = c(0.80,0.2),
+      legend.background = element_rect(colour = 'grey30', fill = 'white', linetype='solid'),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 10),
+      plot.title = element_text(color="black", size=14, face="bold"),
+      axis.title = element_text(size = 12),
+      axis.text.x = element_text(size = 11),
+      axis.text.y = element_text(size = 11),
+      panel.grid = element_blank(),
+      plot.caption = element_text(size = 10, color = "gray30")
+    )
+)
+
+db <- data.frame(db, dev = residuals(lm(i_index_l ~ h_index_l, data = db)))
+
+(plot_dev <- 
+    ggplot(data = db,
+           aes(x = area, y = dev, fill = area, color = area)) +
+    geom_flat_violin(aes(color = area, fill = area),position = position_nudge(x = 0.2, y = 0), alpha = 0.4) +
+    geom_point(aes(y = dev, color = area), 
+               position = position_jitter(width = 0.15), size = 2, alpha = 0.4) +
+    geom_boxplot(width = 0.2, outlier.shape = NA, alpha = 0.4) +
+    labs(title = "B", x = NULL, y= "Deviation from the line (Plot A)") +
+    geom_hline(yintercept=0, col = "grey30", linetype = "dotted")+
+    guides(fill = FALSE, color = FALSE) +
+    scale_fill_manual(values =  COL) +
+    scale_colour_manual(values = COL) +
+    theme_bw() +
+    theme(
+      #legend.position = c(0.8,0.4),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 12),
+      plot.title = element_text(color="black", size=14, face="bold"),
+      axis.title = element_text(size = 12),
+      axis.text.x = element_text(size = 11),
+      axis.text.y = element_text(size = 11),
+      panel.grid = element_blank(),
+      plot.caption = element_text(size = 10, color = "gray30")
+    )
+  
+)
+
+pdf(file = "Figure_2.pdf",
+    width = 10,
+    height = 4)
+
+ggpubr::ggarrange(
+  plot_cor,
+  plot_dev,
+  nrow = 1,
+  ncol = 2,
+  align = "hv"
+)
+
+dev.off()
+
+
+# Mapping -----------------------------------------------------------------
+
+(pedro_map   <-
+   i.map(
+     pedro,
+     homeCountry.point.size = 8,
+     country.col = "grey30"
+   ))
+(stefano_map <-
+    i.map(
+      stefano,
+      homeCountry.point.size = 8,
+      country.col = "grey30"
+    ))
+(carol_map   <-
+    i.map(
+      carol,
+      homeCountry.point.size = 8,
+      country.col = "grey30"
+    ))
+
+pdf(file = "Figure_XX.pdf",
+    width = 12,
+    height = 3)
+
+ggpubr::ggarrange(
+  pedro_map,
+  carol_map,
+  stefano_map,
+  nrow = 1,
+  ncol = 3,
+  labels = c("A", "B", "C"),
+  font.label = list(
+    size = 16,
+    color = "white",
+    face = "bold",
+    family = NULL
+  ),
+  align = "hv"
+)
+dev.off()
+
+
+# #IMAP -------------------------------------------------------------------
+db <- readRDS("authors.rds")
+db$area <- as.factor(db$area)
+levels(db$area)[3] <- "particle physics"
+
+db_eco <- db[db$area == "ecology",]
+db_eco <- db_eco[db_eco$i_index == max(db_eco$i_index),]
+
+db_phy <- db[db$area == "particle physics",]
+db_phy <- db_phy[db_phy$i_index == max(db_phy$i_index),]
+
+db_lit <- db[db$area == "literature",]
+db_lit <- db_lit[db_lit$i_index == max(db_lit$i_index),]
+
+db_phi <- db[db$area == "philosophy",]
+db_phi <- db_phi[db_phi$i_index == max(db_phi$i_index),]
+
+eco   <- wos(as.character(paste0(db_eco[1,1],", ", db_eco[1,2])))
+phy   <- wos(as.character(paste0(db_phy[1,1],", ", db_phy[1,2])))
+lit   <- wos(as.character(paste0(db_lit[1,1],", ", db_lit[1,2])))
+phi   <- wos(as.character(paste0(db_phi[1,1],", ", db_phi[1,2])))
+
+COL <- c("chartreuse3","blue","black","purple")
+
+(eco_map   <- i.map(eco, sea.col = "white", 
+                     country.col = "white", 
+                    line.color = COL[1],
+                    line.alpha = 1,
+                    country.point.color = COL[1],
+                    country.point.line  = COL[1],
+                    homeCountry.point.color = "black",
+                    homeCountry.point.alpha  = 1))
+
+(lit_map   <- i.map(lit, sea.col = "white", 
+                    country.col = "white", 
+                    line.color = COL[2],
+                    line.alpha = 1,
+                    country.point.color = COL[2],
+                    country.point.line  = COL[2],
+                    homeCountry.point.color = "black",
+                    homeCountry.point.alpha  = 1))
+
+(phy_map   <- i.map(phy, sea.col = "white", 
+                    country.col = "white", 
+                    line.color = COL[3],
+                    line.alpha = 1,
+                    country.point.color = COL[3],
+                    country.point.line  = COL[3],
+                    homeCountry.point.color = "black",
+                    homeCountry.point.alpha  = 1))
+
+
+
+(phi_map   <- i.map(phi, sea.col = "white", 
+                    country.col = "white", 
+                    line.color = COL[4],
+                    line.alpha = 1,
+                    country.point.color = COL[4],
+                    country.point.line  = COL[4],
+                    homeCountry.point.color = "black",
+                    homeCountry.point.alpha  = 1))
+
+pdf(file = "Figure 1.pdf", width = 12, height = 8)
+
+ggpubr::ggarrange(eco_map,lit_map,phy_map,phi_map, 
+                  nrow = 2, ncol = 2,
+                  labels = c("A - Ecology","B - Literature","C - Particle physics","D - Philosophy"),
+                  font.label = list(size = 14, color = "black", face = "bold", family = NULL),
+                  align = "hv")
+dev.off()
