@@ -1,0 +1,30 @@
+library("ggplot2")
+library("ggpubr")
+library("RAT")
+library("wosr")
+library("readxl")
+
+# Set working directory ---------------------------------------------------
+
+setwd("C:/Users/ungol/Desktop")
+
+# get data ---------------------------------------------------------------
+
+authors <- read_excel("authors.xls")
+i_index <- c()
+h_index <- c()
+
+for(i in 1:nrow(authors)){
+  author = paste(authors[i, 1], ", ", authors[i, 2], sep = "")
+  cat("Author", i, ":", author, "\n")
+  aut = wos(paste("AU = ", author, " AND AD = Helsinki", sep = ""))
+  n_publ = c(n_publ, length(aut$publication$title))
+  h_index = c(h_index, h.index(aut))
+  i_index = c(i_index, i.index(aut))
+  Sys.sleep(15)
+}
+
+authors <- data.frame(authors, n_publ, h_index, i_index)
+
+
+
