@@ -270,7 +270,7 @@ colnames(db_metafor)
      xlab("")+
      ylab("Effect size [r]")+
      geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Family, col = Predictor_Group), 
-                 size = 1.5, width = 0.2)+
+                 size = 1.5, width = 0.2, aplha =0.8)+
      geom_pointrange(aes(x=label_pred, y=ES, ymin=L, ymax=U, col= label_action), size = 1) + 
      scale_color_manual("Conservation action", values = c("darkmagenta","grey10","darkcyan"))+
      scale_shape_manual("Taxon", values = c(1,2,3))+
@@ -282,7 +282,7 @@ colnames(db_metafor)
 
 
 #Save figure
-pdf(file = "Figure/Meta_analysis.pdf", width = 7, height =5)
+pdf(file = "Figure/Meta_analysis.pdf", width = 9, height =5)
 meta_analysis
 dev.off()
 
