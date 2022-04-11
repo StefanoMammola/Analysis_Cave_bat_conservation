@@ -155,6 +155,7 @@ db_metafor <- db_metafor %>% select(ID,
                              Domain,
                              System,
                              Family,
+                             Genus_specific,
                              Response_Group,
                              Predictor_Group,
                              r = Pearson.s_r)
@@ -166,11 +167,14 @@ db_metafor <- metafor::escalc(measure = "COR", ri = r, ni = N, data = db_metafor
 # Gate
 db_metafor <- db_metafor[db_metafor$Predictor_Group == "Gate" | 
                          db_metafor$Predictor_Group == "Disturbance reduction" |
-                         db_metafor$Predictor_Group == "Restoration", ] ; db_metafor <- droplevels(db_metafor)
+                         db_metafor$Predictor_Group == "Restoration" |
+                         db_metafor$Predictor_Group == "Decontamination" |
+                         db_metafor$Predictor_Group == "Monitoring", ] ; db_metafor <- droplevels(db_metafor)
 
 table(db_metafor$Predictor_Group,db_metafor$Response_Group) # Disturbance reduction & Gate
 
 db_metafor <- db_metafor[!c(db_metafor$Predictor_Group == "Disturbance reduction" & db_metafor$Response_Group == "Population"),]
+db_metafor <- db_metafor[!c(db_metafor$Predictor_Group == "Monitoring" & db_metafor$Response_Group == "Occupancy"),]
 
 #Check sample size for each predictors
 table_n <- data.frame(predictor = NULL, n = NULL, n_papers = NULL)
@@ -184,8 +188,7 @@ for(i in 1:length(unique(levels(db_metafor$Response_Group))))
   )
 
 db_metafor <- db_metafor[db_metafor$Response_Group != "Survival",]
-
-actions_to_analyse    <- c("Disturbance reduction", "Gate", "Restoration")
+actions_to_analyse    <- c("Decontamination", "Disturbance reduction", "Gate", "Monitoring", "Restoration")
 
 SUBSET    <- list()
 MODEL     <- list()
@@ -249,13 +252,13 @@ ORDER <- as.character(result_for_plot$label_pred)
 result_for_plot$label_pred <- factor(result_for_plot$label_pred, ORDER) #sort
 
 #Converting multiple families as multiple
-family_split <- strsplit(as.character(db_metafor$Family), ";")
+genus_split <- strsplit(as.character(db_metafor$Genus_specific), ";")
 
-family <- c()
-for(i in 1:length(family_split))
-  family <- c(family, ifelse(length(family_split[[i]]) > 1, "Multiple", family_split[[i]]) )
+genus <- c()
+for(i in 1:length(genus_split))
+  genus <- c(genus, ifelse(length(genus_split[[i]]) > 1, "Multiple", genus_split[[i]]) )
 
-db_metafor$Family <- family
+db_metafor$Genus_specific <- genus
 
 # renaming Response group as in the result_for_plot
 
@@ -265,38 +268,26 @@ levels(new_name) <- ORDER
 db_metafor <- data.frame(db_metafor,new_name)
 colnames(db_metafor)
 
+
 (meta_analysis <- ggplot(data= result_for_plot) +
      geom_hline(yintercept = 0, lty = 2, col = "grey50") +  # add a dotted line at x=1 after flip
      xlab("")+
      ylab("Effect size [r]")+
-     geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Family, col = Predictor_Group), 
+     geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Genus_specific, col = Predictor_Group), 
                  size = 1.5, width = 0.2, aplha =0.8)+
      geom_pointrange(aes(x=label_pred, y=ES, ymin=L, ymax=U, col= label_action), size = 1) + 
-     scale_color_manual("Conservation action", values = c("darkmagenta","grey10","darkcyan"))+
-     scale_shape_manual("Taxon", values = c(1,2,3))+
+     scale_color_manual("Conservation action", values = c("darkmagenta","grey10","darkcyan", "darkorange", "blue"))+
+     scale_shape_manual("Taxon", values = c(1:8))+
      coord_flip() + 
      theme_custom() + theme(legend.position = "right", 
                             legend.direction = "vertical",
         legend.title = element_text(size = 12, face = "bold"),
-                            axis.text.y = element_text(face= c("plain","bold","plain","bold","plain")))) # flip coordinates (puts labels on y axis)
-
+                            axis.text.y = element_text(face= c("plain","plain","bold","plain","bold", "plain", "plain")))) # flip coordinates (puts labels on y axis)
 
 #Save figure
 pdf(file = "Figure/Meta_analysis.pdf", width = 9, height =5)
 meta_analysis
 dev.off()
-
-plot_r <- semi_colon_splitter(input1 = db_metafor$Family,
-                              input2 = db_metafor$r,
-                             names = c("Species","r"))
-
-plot_r$r <- as.numeric(as.character(plot_r$r))
-
-ggplot(data = plot_r, aes(x=1, y = r))+
-  geom_boxplot()+
-  geom_point(aes(fill = Species), posiion = "jitter",size = 2, alpha = 0.8, pch = 21)+
-  scale_fill_manual(values = c("darkmagenta","grey10","darkcyan")) +
-    theme_custom() 
 
 # Action by region
 
@@ -314,6 +305,8 @@ bar_1 <- data.frame(table(geo_action$Geography,geo_action$Action,geo_action$Test
 colnames(bar_1) <- c("geo","action","test","N")
 
 bar_1 <- bar_1[bar_1$geo != "Global",] ; bar_1 <- droplevels(bar_1)
+
+
 
 bar_1$action <- factor(bar_1$action,levels = 
                        c("Assessment", "Education","Legislation","Monitoring","Prioritization",
