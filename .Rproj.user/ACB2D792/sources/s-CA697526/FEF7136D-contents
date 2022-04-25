@@ -1,0 +1,161 @@
+# R packages -------------------------------------------------------------
+library("wosr")
+
+# Database -------------------------------------------------------------
+
+setwd("/Users/stefanomammola/Desktop/StyMundi")
+data <- read.csv(file = "trial_mammola.csv", header = TRUE, sep = ";", as.is = FALSE)
+
+data$ref.title <- as.character(data$ref.title)
+
+# Setting WOS -------------------------------------------------------------
+
+#Setting sid
+sid <- auth(NULL, password = NULL) #change with your WoS access
+
+#Setting WoS collection
+coll <-  c("SCI", "SSCI", "AHCI", "ISTP", "ISSHP","BSCI", "BHCI", "ESCI")
+
+# WoS queries -------------------------------------------------------------
+
+WOSdb0 <- data.frame(Ref.ID = NULL,
+                    WOS.ID =  NULL,
+                    title =  NULL,
+                    abstract =  NULL,
+                    authors  =  NULL,
+                    n_authors =  NULL,
+                    author_affiliations =  NULL,
+                    author_affiliations_country =  NULL,
+                    keywords =  NULL,
+                    keywords_plus =  NULL,
+                    category =  NULL,
+                    journal =  NULL,
+                    doi =  NULL,
+                    doc_type =  NULL,
+                    citations =  NULL
+)
+
+sample_size <- nrow(data)
+
+
+  #generate the query  
+  match <- query_wos(query = query_i, editions = coll, sid = sid)
+
+
+for (i in 1:sample_size) {
+
+#check if doi is null
+if(data[i,]$DOI=="") {
+  
+query_i <- paste('TI="',gsub('[[:punct:] ]+',' ',data[i,]$ref.title),'"', sep = "")
+
+} else { query_i <- paste('TI="',
+                           gsub('[[:punct:] ]+',' ',data[i,]$ref.title),
+                           '" OR DO="',
+                           data[i,]$DOI,
+                           '"',
+                           sep = "") }
+
+#generate the query  
+match <- query_wos(query = query_i, editions = coll, sid = sid)
+
+if (match$rec_cnt == 1) {
+
+  download  <- pull_wos(query_i, editions = coll, sid = sid)
+  
+  
+  WOSdb <- data.frame(Ref.ID = data[i,]$Ref.ID,
+                      WOS.ID = download$publication$ut,
+                       title = download$publication$title,
+                    abstract = download$publication$abstract,
+                    authors  = paste(download$author$display_name, collapse =" ; "),
+                   n_authors = length(download$author$display_name),
+         author_affiliations = paste(download$address$org_pref, collapse =" ; "),
+ author_affiliations_country = paste(download$address$city, collapse =" ; "),
+                    keywords = paste(download$keyword$keyword, collapse =" ; "),
+               keywords_plus = paste(download$keywords_plus$keywords_plus, collapse = " ; "),
+                    category = paste(download$jsc$jsc, collapse =" ; "),
+                     journal = download$publication$journal,
+                         doi = download$publication$doi,
+                    doc_type = download$doc_type$doc_type,
+                    citations = download$publication$tot_cites
+                     )
+   } else {
+
+WOSdb <- data.frame(Ref.ID = data[i,]$Ref.ID,
+                      WOS.ID =  NA,
+                      title =  NA,
+                      abstract =  NA,
+                      authors  =  NA,
+                      n_authors =  NA,
+                      author_affiliations =  NA,
+                      author_affiliations_country =  NA,
+                      keywords =  NA,
+                      keywords_plus =  NA,
+                      category =  NA,
+                      journal =  NA,
+                      doi =  NA,
+                      doc_type =  NA,
+                      citations =  NA
+) }
+
+WOSdb0 <- rbind(WOSdb0,WOSdb)
+
+}
+
+xlsx::write.xlsx(WOSdb0, "reference_NEW_3.xlsx")
+
+
+# analyss
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+library(tidytext)
+library(R.utils)
+library(wordcloud)
+
+library("xlsx")
+
+db <- read.csv("StyMundi_reference_WOS.csv", header = TRUE, sep = "\t")
+
+# A list of boring and non-useful words, bundled with `tidytext`
+data(stop_words)
+str(db)
+
+Keywords <- db %>%
+  mutate(keywords = as.character(keywords)) %>%
+  unnest_tokens(output = keywords_word,
+                input = keywords) %>%
+  anti_join(stop_words, by = c("keywords_word" = "word")) %>%
+  count(keywords_word, sort = TRUE) 
+
+Keywords %>%
+  with(wordcloud(words = keywords_word, freq = n, max.words = 200))
+
+
+Abstract <- db %>%
+  mutate(abstract = as.character(abstract)) %>%
+  unnest_tokens(output = abstract_word,
+                input = abstract) %>%
+  anti_join(stop_words, by = c("abstract_word" = "word")) %>%
+  count(abstract_word, sort = TRUE) 
+
+Abstract %>% with(wordcloud(words = abstract_word, 
+                            freq = n, 
+                            max.words = 100,
+                            scale=c(3,.2),
+                            random.color=TRUE, color = c("orange","aquamarine3","aquamarine4","darkblue","black")))
+
+Keywords2 <- db %>%
+  mutate(keywords_plus = as.character(keywords_plus)) %>%
+  unnest_tokens(output = keywords_word,
+                input = keywords_plus) %>%
+  anti_join(stop_words, by = c("keywords_word" = "word")) %>%
+  count(keywords_word, sort = TRUE) 
+
+Keywords2 %>%
+  with(wordcloud(words = keywords_word, freq = n, max.words = 100))
+
+
+??wordcloud

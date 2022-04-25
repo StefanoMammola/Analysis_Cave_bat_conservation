@@ -1,14 +1,14 @@
 "","Intervention","N° studies","N° interventions","% testing","N° usable","N° unusable","% usable"
 "1","Assessment",0,0,0,0,0,0
-"2","Decontamination",3,23,66,22,0,96
+"2","Decontamination",3,27,77,1,26,4
 "3","Education",0,0,0,0,0,0
 "4","Eradication",0,0,0,0,0,0
-"5","Gate",18,138,73,103,4,75
-"6","Habitat creation",1,5,31,4,0,80
-"7","Habitat restoration",1,9,20,9,0,100
+"5","Gate",18,138,73,35,103,25
+"6","Habitat creation",1,5,31,1,4,20
+"7","Habitat restoration",1,9,20,0,9,0
 "8","Legislation",0,0,0,0,0,0
-"9","Monitoring",6,29,16,26,0,90
-"10","Prioritization",5,33,40,7,0,21
-"11","Protected area",1,1,1,1,0,100
-"12","Regulate access",3,38,33,9,0,24
+"9","Monitoring",6,29,16,7,20,24
+"10","Prioritization",5,33,40,26,7,79
+"11","Protected area",1,1,1,0,1,0
+"12","Regulate access",3,38,33,29,9,76
 "13","Risk assessment",0,0,0,0,0,0
