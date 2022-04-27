@@ -469,16 +469,21 @@ db_full <- db_full[db_full$Conservation_Group != "Education",] ; db_full <- drop
 db_full <- db_full[db_full$Conservation_Group != "Assessment",] ; db_full <- droplevels(db_full)
 db_full <- db_full[db_full$Conservation_Group != "Monitoring",] ; db_full <- droplevels(db_full)
 
+db_full <- db_full[db_full$Taxon_Group != "Not specific",] ; db_full <- droplevels(db_full)
+
+
 
 db_network <- semi_colon_splitter(input1 = db_full$Taxon_Group,
                                   input2 = db_full$Conservation_Action, 
                                   names = c("Taxon","Action"))
 
-levels(db_network$Taxon)
+# Sample size
+nrow(db_network) ; length(unique(levels(db_full$ID)))
 
-# Removing not specific and renaming arthropoda
-db_network <- db_network[db_network$Taxon != "Not specific",] ; db_network <- droplevels(db_network)
+# Renaming arthropoda
 levels(db_network$Taxon)[1]  <- "Arthropods"
+
+
 
 #Sorting
 db_network$Taxon <- factor(db_network$Taxon, levels =
