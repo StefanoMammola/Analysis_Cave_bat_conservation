@@ -1,7 +1,7 @@
 ###############################################################
 
-## Practical conservation of bats in subterranean habitats
-## Meierhofer M., ... Mammola S.
+## Let's not wing it: Practical conservation of subterranean-roosting bats
+## Meierhofer M., et al.
 
 ## ------------------------------------------------------------------------
 # 'R script to reproduce the analyses'

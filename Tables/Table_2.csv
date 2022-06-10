@@ -1,8 +1,11 @@
-"Conservation action"	"Response"	"Beta +/- SE"	"95% CI"	"z"	"p"	"failsafe [N]"	"failsafe [p]"
-"1"	"Decontamination"	"Pathogen (8, 2)"	"-0.385 +/- 0.088"	"[-0.557 — -0.214]"	-4.398	0	69	"<0.001"
-"2"	"Disturbance reduction"	"Behavior (34, 2)"	"0.593 +/- 0.066"	"[0.464 — 0.722]"	9.001	0	1712	"<0.001"
-"3"	"Gate"	"Behavior (42, 8)"	"0.321 +/- 0.159"	"[0.009 — 0.633]"	2.018	0.044	7787	"<0.001"
-"4"	"Gate"	"Occupancy (12, 4)"	"0.317 +/- 0.27"	"[-0.213 — 0.846]"	1.172	0.241	379	"<0.001"
-"5"	"Gate"	"Population (49, 9)"	"0.083 +/- 0.218"	"[-0.344 — 0.509]"	0.379	0.705	Inf	"<0.001"
-"6"	"Monitoring"	"Population (5, 3)"	"0.495 +/- 0.356"	"[-0.201 — 1.192]"	1.393	0.164	268	"<0.001"
-"7"	"Restoration"	"Population (23, 4)"	"0.79 +/- 0.169"	"[0.459 — 1.122]"	4.673	0	820236606	"<0.001"
+"","Impact","N° studies","N° interventions testing","N° interventions tot","% testing","N° usable","N° unusable","% usable"
+"1","Alien species",0,0,3,0,0,0,0
+"2","All",6,39,124,31,29,9,74
+"3","Climate change",1,1,12,8,1,0,100
+"4","None identified",5,52,143,36,13,38,25
+"5","Pathogen",5,33,62,53,2,31,6
+"6","Poaching",0,0,34,0,0,0,0
+"7","Pollution",0,0,17,0,0,0,0
+"8","Subterranean habitat change",3,17,115,15,0,17,0
+"9","Surface habitat change",1,11,87,13,0,11,0
+"10","Visitors",16,127,267,48,54,73,43

@@ -1,7 +1,7 @@
 ###############################################################
 
-## Practical conservation of bats in subterranean habitats
-## Meierhofer M., ... Mammola S.
+## Let's not wing it: Practical conservation of subterranean-roosting bats
+## Meierhofer M., et al.
 
 ## ------------------------------------------------------------------------
 # 'R script to reproduce the analyses'
@@ -19,25 +19,11 @@ rm(list = ls())
 # Loading R package -------------------------------------------------------
 
 library("metafor")   # Meta-Analysis Package for R
-library("ggplot2")       
+library("ggplot2") 
+library("ggraph")
+library("igraph")        
+library("tidygraph")
 library("tidyverse")
-
-
-# library("circlize")      
-# library("cowplot")
-# library("dplyr")         
-# library("ggplot2")       
-# library("ggpubr")
-# library("grid")
-# library("gridExtra")
-# library("maps")
-# library("rsq")
-# library("parameters")
-# library("performance")
-# library("scatterpie")
-# library("tidyr")
-# library("tidygraph")
-# library("ggraph")
 
 # Sourcing useful functions ------------------------------------------------
 
@@ -73,6 +59,7 @@ nrow(db_full_unique)
 #Subselecting BAT studies
 db <- db_full[db_full$Bat_analysis == "yes",] ; db <- droplevels(db)
 
+db$Pearson.s_r <- as.numeric(db$Pearson.s_r)
 db$N <- as.numeric(db$N)
 
 # 
@@ -81,7 +68,6 @@ db_unique <- distinct(db, ID, .keep_all = TRUE)
 nrow(db_unique)
 nrow(db)
 
-
 table(db_unique$Database)
 table(db_unique$Publication_type)
 
@@ -89,7 +75,7 @@ table(db_unique$Publication_type)
 a <- ifelse(table(db$ID, db$Taxon_Group)>0,1,0)
 table(rowSums(a))
 
-sum(table(rowSums(a))[c(2,3)])/sum(table(rowSums(a)))*100 #3.87 % of studies consider multiple organisms
+sum(table(rowSums(a))[c(2,3)])/sum(table(rowSums(a)))*100 #4.06 % of studies consider multiple organisms
 
 # Selecting only bats
 db <- db[db$Taxon_Group == "Bats",] ; db <- droplevels(db)
@@ -117,12 +103,13 @@ mean(table(db$ID)) ; SE(table(db$ID)) # mean number of actions/paper
 table(db$Tested_statistically)[2] / sum(table(db$Tested_statistically)) #N° and % testing
 
 #How many estimates would be usable for meta analysis?
-n_studies    <- c() 
-n_estimates  <- c()
-perc_testing <- c()
-usable       <- c()
-unusable     <- c()
-perc_usable  <- c()
+n_studies            <- c() 
+n_estimates_testing  <- c()
+n_estimates_tot      <- c()
+perc_testing         <- c()
+usable               <- c()
+unusable             <- c()
+perc_usable          <- c()
 
 for(i in 1:nlevels(db$Conservation_Action)){
 
@@ -131,7 +118,8 @@ for(i in 1:nlevels(db$Conservation_Action)){
   
   table_i        <- table(db_i$Pearson_r_conversion) #% of usable statistics
   n_studies      <- c(n_studies, nrow(distinct(db_i, ID, .keep_all = TRUE)) ) #unique studies
-  n_estimates    <- c(n_estimates, nrow(db_i) ) #unique estimates
+  n_estimates_testing    <- c(n_estimates_testing, nrow(db_i) ) #unique estimates
+  n_estimates_tot    <- c(n_estimates_tot, nrow(db_i_tot) ) #unique estimates
   perc_testing   <- c(perc_testing, round(nrow(db_i)/nrow(db_i_tot),2)*100 )
   usable         <- c(usable, sum(table_i[1],table_i[3]))
   unusable       <- c(unusable, sum(table_i[2]))
@@ -139,11 +127,42 @@ for(i in 1:nlevels(db$Conservation_Action)){
   
 }
 
-Table_1 <- data.frame(Intervention = levels(db$Conservation_Action), n_studies, n_estimates, perc_testing, usable, unusable, perc_usable)
+Table_1 <- data.frame(Intervention = levels(db$Conservation_Action), n_studies, n_estimates_testing, n_estimates_tot, perc_testing, usable, unusable, perc_usable)
 Table_1[is.na(Table_1)] <- 0
-colnames(Table_1) <- c("Intervention", "N° studies", "N° interventions", "% testing", "N° usable", "N° unusable", "% usable")
+colnames(Table_1) <- c("Intervention", "N° studies", "N° interventions testing","N° interventions tot", "% testing", "N° usable", "N° unusable", "% usable")
 
 write.csv(Table_1,"Tables/Table_1.csv")
+
+#How many estimates would be usable for meta analysis?
+n_studies            <- c() 
+n_estimates_testing  <- c()
+n_estimates_tot      <- c()
+perc_testing         <- c()
+usable               <- c()
+unusable             <- c()
+perc_usable          <- c()
+
+for(i in 1:nlevels(db$Impact)){
+  
+  db_i_tot <- db[db$Impact == levels(db$Impact)[i],]
+  db_i     <- db_i_tot[db_i_tot$Tested_statistically == "yes",]
+  
+  table_i        <- table(db_i$Pearson_r_conversion) #% of usable statistics
+  n_studies      <- c(n_studies, nrow(distinct(db_i, ID, .keep_all = TRUE)) ) #unique studies
+  n_estimates_testing    <- c(n_estimates_testing, nrow(db_i) ) #unique estimates
+  n_estimates_tot    <- c(n_estimates_tot, nrow(db_i_tot) ) #unique estimates
+  perc_testing   <- c(perc_testing, round(nrow(db_i)/nrow(db_i_tot),2)*100 )
+  usable         <- c(usable, sum(table_i[1],table_i[3]))
+  unusable       <- c(unusable, sum(table_i[2]))
+  perc_usable    <- c(perc_usable, round((usable[i]/sum(table_i)),2)*100)
+  
+}
+
+Table_2 <- data.frame(Impact = levels(db$Impact), n_studies, n_estimates_testing, n_estimates_tot, perc_testing, usable, unusable, perc_usable)
+Table_2[is.na(Table_2)] <- 0
+colnames(Table_2) <- c("Impact", "N° studies", "N° interventions testing","N° interventions tot", "% testing", "N° usable", "N° unusable", "% usable")
+
+write.csv(Table_2,"Tables/Table_2.csv")
 
 #Redefining levels
 levels(db$Impact)[2] <- "Multiple"
@@ -300,18 +319,19 @@ result_for_plot$label_pred <- factor(result_for_plot$label_pred, ORDER) #sort
 
 #save a table
 
-table_2 <- result_for_plot %>% dplyr::select(label_action, label_pred, beta, se, ci.lb, ci.ub, z, p, failsafe_N, failsafe_p)
+table_3 <- result_for_plot %>% dplyr::select(label_action, label_pred, beta, se, ci.lb, ci.ub, z, p, failsafe_N, failsafe_p)
 
-table_2$ci.lb <- paste0("[",table_2$ci.lb, " — ",table_2$ci.ub, "]") 
-table_2$beta <-  paste0(table_2$beta, " +/- ", table_2$se)
-table_2 <- table_2 %>% dplyr::select(-c(se,ci.ub))
-table_2$failsafe_p <- rep("<0.001",nrow(table_2))
+table_3$ci.lb <- paste0("[",table_3$ci.lb, " — ",table_3$ci.ub, "]") 
+table_3$beta <-  paste0(table_3$beta, " +/- ", table_3$se)
+table_3 <- table_3 %>% dplyr::select(-c(se,ci.ub))
+table_3$failsafe_p <- rep("<0.001",nrow(table_3))
 
-colnames(table_2) <- c("Conservation action", 
+colnames(table_3) <- c("Conservation action", 
                        "Response", 
                        "Beta +/- SE", "95% CI", "z", "p", "failsafe [N]", "failsafe [p]")
 
-write.table(table_2, "Tables/Table_2.csv", append = FALSE, sep = "\t", dec = ".")
+write.table(table_3, "Tables/Table_3.csv", append = FALSE, sep = "\t", dec = ".")
+
 #Converting multiple families as multiple
 genus_split <- strsplit(as.character(db_metafor$Genus_specific), ";")
 
@@ -328,13 +348,16 @@ levels(new_name) <- ORDER
 db_metafor <- data.frame(db_metafor,new_name)
 colnames(db_metafor)
 
+db_metafor$Genus_specific <- as.factor(db_metafor$Genus_specific)
+db_metafor$Genus_specific <- relevel(db_metafor$Genus_specific , ref = "Multiple")
+
 (meta_analysis <- ggplot(data= result_for_plot) +
      geom_hline(yintercept = 0, lty = 2, col = "grey50") +  # add a dotted line at x=1 after flip
      xlab("")+
      ylab("Effect size [r]")+
      geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Genus_specific, col = Predictor_Group), 
                  size = 1.5, width = 0.2, aplha =0.8)+
-     geom_pointrange(aes(x=label_pred, y=ES, ymin=L, ymax=U, col= label_action), size = 1) + 
+     geom_pointrange(aes(x = label_pred, y = ES, ymin = L, ymax = U, col = label_action), size = 1) + 
      scale_color_manual("Conservation action", values = c("darkmagenta","grey10","darkcyan", "darkorange", "blue"))+
      scale_shape_manual("Taxon", values = c(1:8))+
      coord_flip() + 
@@ -439,10 +462,6 @@ dev.off()
 
 # Network -----------------------------------------------------------------
 
-library("ggraph")
-library("igraph")        
-library("tidygraph")
-
 db_full <-
   read.csv(
     file = "Data/Master_Database_Cave_Conservation.csv",
@@ -459,10 +478,6 @@ db_full <- db_full[db_full$Remove != "yes",] ; db_full <- droplevels(db_full)
 # removing aquatic organisms
 db_full <- db_full[db_full$System != "Anchialine/Marine",] ; db_full <- droplevels(db_full)
 db_full <- db_full[db_full$System != "Groundwater",] ; db_full <- droplevels(db_full)
-# db_full <- db_full[db_full$System != "Cave ; Groundwater",] ; db_full <- droplevels(db_full)
-# db_full <- db_full[db_full$System != "Fissural systems ; Groundwater",] ; db_full <- droplevels(db_full)
-# db_full <- db_full[db_full$System != "Cave; Groundwater; Show cave",] ; db_full <- droplevels(db_full)
-# db_full <- db_full[db_full$System != "All",] ; db_full <- droplevels(db_full)
 
 # removing indirect conservation actions
 db_full <- db_full[db_full$Conservation_Group != "Education",] ; db_full <- droplevels(db_full)
@@ -470,8 +485,6 @@ db_full <- db_full[db_full$Conservation_Group != "Assessment",] ; db_full <- dro
 db_full <- db_full[db_full$Conservation_Group != "Monitoring",] ; db_full <- droplevels(db_full)
 
 db_full <- db_full[db_full$Taxon_Group != "Not specific",] ; db_full <- droplevels(db_full)
-
-
 
 db_network <- semi_colon_splitter(input1 = db_full$Taxon_Group,
                                   input2 = db_full$Conservation_Action, 
@@ -482,8 +495,6 @@ nrow(db_network) ; length(unique(levels(db_full$ID)))
 
 # Renaming arthropoda
 levels(db_network$Taxon)[1]  <- "Arthropods"
-
-
 
 #Sorting
 db_network$Taxon <- factor(db_network$Taxon, levels =
@@ -501,24 +512,18 @@ bipartite_matrix <- db_network %>%
 
 bipartite_matrix <- matrix(bipartite_matrix, ncol = ncol(bipartite_matrix), dimnames = dimnames(bipartite_matrix))
 
-# animal_jaccard       <- ade4::dist.binary(bipartite_matrix, method = 1, upper=TRUE, diag = FALSE) # Method #1 is "Jaccard Index"
-# #conservation_jaccard <- ade4::dist.binary(t(bipartite_matrix), method = 1, upper=TRUE, diag = FALSE)
-# 
-# animal_jaccard <- as.matrix(animal_jaccard)
-# diag(animal_jaccard) <-0
-
 animal_jaccard <- BAT::beta(bipartite_matrix, abund = TRUE)$Btot
 animal_jaccard <- as.matrix(animal_jaccard)   
 diag(animal_jaccard) <-0
 
 animal_jaccard = 1-animal_jaccard
 
+
+arthropods <- animal_jaccard[2,-c(2)]
+
 animal_jaccard_net <- graph_from_adjacency_matrix(animal_jaccard, 
                                          mode = "undirected",
                                          weighted = TRUE) %>% as_tbl_graph()
-
-#Select bat nodes
-#animal_jaccard_net <- animal_jaccard_net %>% activate(edges) %>% mutate(Bat = edge_is_from(1)) %>% filter(Bat == TRUE)
 
 #Add sample size
 N <- data.frame(table(db_network$Taxon)) ; colnames(N) <- c("name","N")
