@@ -46,7 +46,6 @@ db_full <-
     as.is = FALSE
   )
 
-
 # Removing duplicates
 
 db_full <- db_full[db_full$Remove != "yes",] ; db_full <- droplevels(db_full)
@@ -207,8 +206,10 @@ db_metafor <- db_metafor[db_metafor$Predictor_Group == "Gate" |
 
 table(db_metafor$Predictor_Group,db_metafor$Response_Group) # Disturbance reduction & Gate
 
+# Removing combinations with 1 study only
 db_metafor <- db_metafor[!c(db_metafor$Predictor_Group == "Disturbance reduction" & db_metafor$Response_Group == "Population"),]
 db_metafor <- db_metafor[!c(db_metafor$Predictor_Group == "Monitoring" & db_metafor$Response_Group == "Pathogen"),]
+db_metafor <- db_metafor[!c(db_metafor$Predictor_Group == "Restoration" & db_metafor$Response_Group == "Behavior"),]
 
 #Check sample size for each predictors
 table_n <- data.frame(predictor = NULL, n = NULL, n_papers = NULL)
@@ -356,15 +357,16 @@ db_metafor$Genus_specific <- relevel(db_metafor$Genus_specific , ref = "Multiple
      xlab("")+
      ylab("Effect size [r]")+
      geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Genus_specific, col = Predictor_Group), 
-                 size = 1.5, width = 0.2, aplha =0.8)+
+                 size = 1.5, width = 0.2)+
      geom_pointrange(aes(x = label_pred, y = ES, ymin = L, ymax = U, col = label_action), size = 1) + 
      scale_color_manual("Conservation action", values = c("darkmagenta","grey10","darkcyan", "darkorange", "blue"))+
-     scale_shape_manual("Taxon", values = c(1:8))+
+     scale_shape_manual("Taxon", values = c(1:8))+ #, guide = guide_legend(element_text(face = "italic")
      coord_flip() + 
      theme_custom() + theme(legend.position = "right", 
                             legend.direction = "vertical",
-        legend.title = element_text(size = 12, face = "bold"),
-                            axis.text.y = element_text(face= c("plain","plain","bold","plain","bold", "plain", "plain")))) # flip coordinates (puts labels on y axis)
+                            legend.text = element_text(face= c("italic")),
+                            legend.title = element_text(size = 12, face = "bold"),
+                            axis.text.y = element_text(face= c("plain","plain","bold","plain","bold", "plain", "plain"))))
 
 #Save figure
 pdf(file = "Figure/Figure_3.pdf", width = 9, height =5)
