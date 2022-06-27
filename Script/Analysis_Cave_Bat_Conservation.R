@@ -47,7 +47,6 @@ db_full <-
   )
 
 # Removing duplicates
-
 db_full <- db_full[db_full$Remove != "yes",] ; db_full <- droplevels(db_full)
 
 #Database only with distinct paper
