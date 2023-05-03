@@ -1,6 +1,6 @@
 ###############################################################
 
-## Let's not wing it: Practical conservation of subterranean-roosting bats
+## A global meta-analysis of conservation measures for subterranean-roosting bats
 ## Meierhofer M., et al.
 
 ## ------------------------------------------------------------------------
