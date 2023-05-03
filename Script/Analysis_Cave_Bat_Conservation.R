@@ -2,6 +2,7 @@
 
 ## A global meta-analysis of conservation measures for subterranean-roosting bats
 ## Meierhofer M., et al.
+## Conservation Biology
 
 ## ------------------------------------------------------------------------
 # 'R script to reproduce the analyses'
