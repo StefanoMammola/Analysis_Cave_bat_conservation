@@ -1,6 +1,6 @@
 ###############################################################
 
-## A global meta-analysis of conservation measures for subterranean-roosting bats
+## Effective conservation of subterranean-roosting bats
 ## Meierhofer M., et al.
 ## Conservation Biology
 
@@ -352,10 +352,12 @@ colnames(db_metafor)
 db_metafor$Genus_specific <- as.factor(db_metafor$Genus_specific)
 db_metafor$Genus_specific <- relevel(db_metafor$Genus_specific , ref = "Multiple")
 
+paste0("Effect size [","italic(r)","]"), parse = TRUE)
+
 (meta_analysis <- ggplot(data= result_for_plot) +
      geom_hline(yintercept = 0, lty = 2, col = "grey50") +  # add a dotted line at x=1 after flip
      xlab("")+
-     ylab("Effect size [r]")+
+     ylab(expression(paste("Effect size [",italic("r"),"]")))+
      geom_jitter(data = db_metafor, aes(x = new_name, y = r, shape = Genus_specific, col = Predictor_Group), 
                  size = 1.5, width = 0.2)+
      geom_pointrange(aes(x = label_pred, y = ES, ymin = L, ymax = U, col = label_action), size = 1) + 
@@ -444,6 +446,8 @@ bar_2$Impact <- factor(bar_2$Impact,levels =
                            "Subterranean habitat change",
                            "Surface habitat change",     
                            "Visitors"))
+
+levels(bar_2$Impact)[3] <- "Non-native species"
 
 (bar_p2 <-  ggplot(bar_2, aes(x = Impact, y = N, fill = test)) +
     facet_wrap( ~ geo, nrow = 2, ncol = 3) +
